@@ -1,0 +1,47 @@
+{
+  "version": 1,
+  "logos": [
+    {
+      "id": "sony",
+      "file": "SONY.jpg",
+      "label": "SONY",
+      "match": ["sony"]
+    },
+    {
+      "id": "nikon",
+      "file": "NIKON.jpg",
+      "label": "NIKON",
+      "match": ["nikon", "nikon corporation"]
+    },
+    {
+      "id": "olympus",
+      "file": "OLYMPUS.jpg",
+      "label": "OLYMPUS",
+      "match": ["olympus", "om digital", "om digital solutions"]
+    },
+    {
+      "id": "canon",
+      "file": "CANON.jpg",
+      "label": "CANON",
+      "match": ["canon"]
+    },
+    {
+      "id": "pentax",
+      "file": "PENTAX.jpg",
+      "label": "PENTAX",
+      "match": ["pentax"]
+    },
+    {
+      "id": "panasonic",
+      "file": "PANASONIC.jpg",
+      "label": "PANASONIC",
+      "match": ["panasonic", "lumix"]
+    },
+    {
+      "id": "ricoh",
+      "file": "RICOH.jpg",
+      "label": "RICOH",
+      "match": ["ricoh"]
+    }
+  ]
+}

@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>EXIF-Banner</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <strong>EXIF-Banner</strong>
+        <div class="brandLine">
+          <span id="statusText">等待扫描</span>
+          <a href="https://github.com/stlin256/EXIF-Banner" target="_blank" rel="noreferrer">@stlin256</a>
+        </div>
+      </div>
+      <div class="pathbar">
+        <input id="folderInput" type="text" value="" placeholder="选择相册文件夹" />
+        <button id="pickFolderBtn" type="button">选择相册</button>
+        <label class="check"><input id="recursiveInput" type="checkbox" /> 递归</label>
+        <button id="scanBtn" type="button">扫描</button>
+      </div>
+      <div class="actions">
+        <button id="exportImagesBtn" type="button" disabled>导出图片</button>
+        <button id="exportPptxBtn" type="button" disabled>导出 PPTX</button>
+      </div>
+    </header>
+
+    <main class="workspace">
+      <aside class="photoPanel">
+        <div class="panelHead photoHead">
+          <div>
+            <span>照片</span>
+            <span id="countText">0/0</span>
+          </div>
+          <div class="selectionActions">
+            <button id="selectAllBtn" type="button">全选</button>
+            <button id="clearSelectionBtn" type="button">清空</button>
+          </div>
+        </div>
+        <div id="photoList" class="photoList"></div>
+      </aside>
+
+      <section class="previewPanel">
+        <div class="previewStage" id="previewStage">
+          <div class="emptyState">选择相册后开始预览</div>
+          <div class="slideCanvas" id="slideCanvas" hidden>
+            <img id="previewImage" alt="" />
+            <div id="bannerPreview" class="bannerPreview">
+              <div class="brandPreview" id="brandPreview">
+                <img id="logoPreview" class="logoPreview" alt="" hidden />
+                <span id="brandTextPreview">NIKON</span>
+              </div>
+              <div class="infoPreview">
+                <div id="modelPreview">NIKON D500</div>
+                <div id="lensPreview">AF-S DX VR Zoom-Nikkor 16-85mm</div>
+              </div>
+              <div class="paramsPreview" id="paramsPreview">16 mm&nbsp;&nbsp;&nbsp;&nbsp;F3.5&nbsp;&nbsp;&nbsp;&nbsp;1/400s&nbsp;&nbsp;&nbsp;&nbsp;ISO 280</div>
+            </div>
+          </div>
+        </div>
+        <div class="metaStrip">
+          <span id="fileNameText">未选择</span>
+        </div>
+      </section>
+
+      <aside class="controlPanel">
+        <div class="panelHead">
+          <span>横幅</span>
+          <button id="resetBtn" type="button">重置</button>
+        </div>
+
+        <label class="field">
+          <span>背景色</span>
+          <input id="backgroundInput" type="color" value="#f6f4ef" />
+        </label>
+        <label class="field">
+          <span>横幅色</span>
+          <input id="bannerColorInput" type="color" value="#000000" />
+        </label>
+        <label class="field pickerRow">
+          <span>Logo 路径</span>
+          <div class="pickerField">
+            <input id="logoPathInput" type="text" placeholder="留空则按相机品牌自动匹配" />
+            <button id="pickLogoBtn" type="button">选择 Logo</button>
+          </div>
+        </label>
+        <label class="field">
+          <span>品牌文字</span>
+          <input id="brandTextInput" type="text" placeholder="留空则自动读取相机品牌" />
+        </label>
+        <label class="field">
+          <span>底片比例</span>
+          <select id="slideAspectRatioInput">
+            <option value="16:9" selected>16:9</option>
+            <option value="3:2">3:2</option>
+            <option value="4:3">4:3</option>
+            <option value="1:1">1:1</option>
+            <option value="9:16">9:16</option>
+          </select>
+        </label>
+        <label class="field">
+          <span>导出格式</span>
+          <select id="exportFormatInput">
+            <option value="jpeg" selected>JPEG</option>
+            <option value="png">PNG</option>
+          </select>
+        </label>
+
+        <div class="sliderGrid">
+          <label>
+            <span>横幅宽度 <b id="bannerWidthValue">62.5%</b></span>
+            <input id="bannerWidthInput" type="range" min="35" max="95" step="0.5" value="62.5" />
+          </label>
+          <label>
+            <span>横幅高度 <b id="bannerHeightValue">7.4%</b></span>
+            <input id="bannerHeightInput" type="range" min="4" max="15" step="0.001" value="7.407" />
+          </label>
+          <label>
+            <span>透明度 <b id="opacityValue">60%</b></span>
+            <input id="opacityInput" type="range" min="10" max="95" step="1" value="60" />
+          </label>
+          <label>
+            <span>左右页边距 <b id="pageMarginXValue">2.5%</b></span>
+            <input id="pageMarginXInput" type="range" min="0" max="12" step="0.1" value="2.5" />
+          </label>
+          <label>
+            <span>上下页边距 <b id="pageMarginYValue">1.85%</b></span>
+            <input id="pageMarginYInput" type="range" min="0" max="15" step="0.05" value="1.85" />
+          </label>
+          <label>
+            <span>间距 <b id="gapValue">1.85%</b></span>
+            <input id="gapInput" type="range" min="0" max="6" step="0.001" value="1.852" />
+          </label>
+          <label>
+            <span>机身/镜头字号 <b id="infoFontValue">2.04%</b></span>
+            <input id="infoFontInput" type="range" min="1.2" max="3.8" step="0.001" value="2.037" />
+          </label>
+          <label>
+            <span>参数字号 <b id="paramFontValue">2.6%</b></span>
+            <input id="paramFontInput" type="range" min="1.6" max="4.2" step="0.001" value="2.593" />
+          </label>
+          <label>
+            <span>JPEG 质量 <b id="qualityValue">92</b></span>
+            <input id="qualityInput" type="range" min="70" max="100" step="1" value="92" />
+          </label>
+          <label>
+            <span>导出分辨率 <b id="exportScaleValue">100%</b></span>
+            <input id="exportScaleInput" type="range" min="10" max="100" step="5" value="100" />
+          </label>
+        </div>
+
+        <label class="check full"><input id="shadowInput" type="checkbox" checked /> 图片阴影</label>
+      </aside>
+    </main>
+
+    <div id="busyOverlay" class="busyOverlay" aria-live="polite">
+      <div class="busyPanel">
+        <div class="shutterLoader" aria-hidden="true">
+          <span></span>
+          <span></span>
+          <span></span>
+          <span></span>
+          <span></span>
+          <span></span>
+        </div>
+        <span id="busyText" class="busyText">处理中</span>
+        <div id="progressTrack" class="progressTrack" hidden>
+          <div id="progressFill" class="progressFill"></div>
+        </div>
+        <span id="progressText" class="progressText" hidden>0%</span>
+      </div>
+    </div>
+    <div id="exportCompleteDialog" class="dialogOverlay" role="dialog" aria-modal="true" aria-labelledby="exportCompleteTitle" hidden>
+      <div class="dialogPanel">
+        <div class="dialogIcon" aria-hidden="true">✓</div>
+        <h2 id="exportCompleteTitle">导出完成</h2>
+        <p id="exportCompleteSummary">已完成导出</p>
+        <div class="dialogPath">
+          <span>保存位置</span>
+          <div id="exportCompletePath" class="pathValue"></div>
+        </div>
+        <div class="dialogActions">
+          <button id="exportCompleteCloseBtn" type="button">完成</button>
+        </div>
+      </div>
+    </div>
+    <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>
