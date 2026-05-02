@@ -16,12 +16,6 @@ Windows users can download the single-file executable:
 
 [Go to GitHub Releases](https://github.com/stlin256/EXIF-Banner/releases)
 
-Release assets follow this naming convention:
-
-```text
-EXIF-Banner-vX.Y.Z-windows-amd64.exe
-```
-
 Download and double-click the executable. It starts a local web service and opens the browser UI; album scanning, rendering, and export all happen on your computer.
 
 ## Examples

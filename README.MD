@@ -16,12 +16,6 @@ Windows 用户可以直接下载单文件 EXE：
 
 [前往 GitHub Releases](https://github.com/stlin256/EXIF-Banner/releases)
 
-当前发布资产命名规则：
-
-```text
-EXIF-Banner-vX.Y.Z-windows-amd64.exe
-```
-
 下载后双击运行即可。程序会在本机启动 Web 服务并打开浏览器界面；照片扫描、横幅渲染和导出都在本地完成。
 
 ## 示例
