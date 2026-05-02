@@ -144,6 +144,10 @@ input[type="color"] {
   gap: 8px;
 }
 
+.languageSelect {
+  min-width: 96px;
+}
+
 .actions button:last-child,
 #scanBtn {
   background: var(--accent);
@@ -427,9 +431,13 @@ input[type="color"] {
   padding-top: 6px;
 }
 
-.sliderGrid label span {
+.sliderGrid label > span {
   display: flex;
   justify-content: space-between;
+}
+
+.sliderGrid label > span > span {
+  display: inline;
 }
 
 .sliderGrid b {

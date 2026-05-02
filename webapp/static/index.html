@@ -16,14 +16,18 @@
         </div>
       </div>
       <div class="pathbar">
-        <input id="folderInput" type="text" value="" placeholder="选择相册文件夹" />
-        <button id="pickFolderBtn" type="button">选择相册</button>
-        <label class="check"><input id="recursiveInput" type="checkbox" /> 递归</label>
-        <button id="scanBtn" type="button">扫描</button>
+        <input id="folderInput" type="text" value="" placeholder="选择相册文件夹" data-i18n-placeholder="placeholder.albumFolder" />
+        <button id="pickFolderBtn" type="button" data-i18n="button.pickAlbum">选择相册</button>
+        <label class="check"><input id="recursiveInput" type="checkbox" /> <span data-i18n="control.recursive">递归</span></label>
+        <button id="scanBtn" type="button" data-i18n="button.scan">扫描</button>
       </div>
       <div class="actions">
-        <button id="exportImagesBtn" type="button" disabled>导出图片</button>
-        <button id="exportPptxBtn" type="button" disabled>导出 PPTX</button>
+        <select id="languageInput" class="languageSelect" aria-label="Language">
+          <option value="zh">中文</option>
+          <option value="en">English</option>
+        </select>
+        <button id="exportImagesBtn" type="button" disabled data-i18n="button.exportImages">导出图片</button>
+        <button id="exportPptxBtn" type="button" disabled data-i18n="button.exportPptx">导出 PPTX</button>
       </div>
     </header>
 
@@ -31,12 +35,12 @@
       <aside class="photoPanel">
         <div class="panelHead photoHead">
           <div>
-            <span>照片</span>
+            <span data-i18n="panel.photos">照片</span>
             <span id="countText">0/0</span>
           </div>
           <div class="selectionActions">
-            <button id="selectAllBtn" type="button">全选</button>
-            <button id="clearSelectionBtn" type="button">清空</button>
+            <button id="selectAllBtn" type="button" data-i18n="button.selectAll">全选</button>
+            <button id="clearSelectionBtn" type="button" data-i18n="button.clear">清空</button>
           </div>
         </div>
         <div id="photoList" class="photoList"></div>
@@ -44,7 +48,7 @@
 
       <section class="previewPanel">
         <div class="previewStage" id="previewStage">
-          <div class="emptyState">选择相册后开始预览</div>
+          <div class="emptyState" data-i18n="empty.preview">选择相册后开始预览</div>
           <div class="slideCanvas" id="slideCanvas" hidden>
             <img id="previewImage" alt="" />
             <div id="bannerPreview" class="bannerPreview">
@@ -67,31 +71,31 @@
 
       <aside class="controlPanel">
         <div class="panelHead">
-          <span>横幅</span>
-          <button id="resetBtn" type="button">重置</button>
+          <span data-i18n="panel.banner">横幅</span>
+          <button id="resetBtn" type="button" data-i18n="button.reset">重置</button>
         </div>
 
         <label class="field">
-          <span>背景色</span>
+          <span data-i18n="field.background">背景色</span>
           <input id="backgroundInput" type="color" value="#f6f4ef" />
         </label>
         <label class="field">
-          <span>横幅色</span>
+          <span data-i18n="field.bannerColor">横幅色</span>
           <input id="bannerColorInput" type="color" value="#000000" />
         </label>
         <label class="field pickerRow">
-          <span>Logo 路径</span>
+          <span data-i18n="field.logoPath">Logo 路径</span>
           <div class="pickerField">
-            <input id="logoPathInput" type="text" placeholder="留空则按相机品牌自动匹配" />
-            <button id="pickLogoBtn" type="button">选择 Logo</button>
+            <input id="logoPathInput" type="text" placeholder="留空则按相机品牌自动匹配" data-i18n-placeholder="placeholder.logoPath" />
+            <button id="pickLogoBtn" type="button" data-i18n="button.pickLogo">选择 Logo</button>
           </div>
         </label>
         <label class="field">
-          <span>品牌文字</span>
-          <input id="brandTextInput" type="text" placeholder="留空则自动读取相机品牌" />
+          <span data-i18n="field.brandText">品牌文字</span>
+          <input id="brandTextInput" type="text" placeholder="留空则自动读取相机品牌" data-i18n-placeholder="placeholder.brandText" />
         </label>
         <label class="field">
-          <span>底片比例</span>
+          <span data-i18n="field.aspectRatio">底片比例</span>
           <select id="slideAspectRatioInput">
             <option value="16:9" selected>16:9</option>
             <option value="3:2">3:2</option>
@@ -101,7 +105,7 @@
           </select>
         </label>
         <label class="field">
-          <span>导出格式</span>
+          <span data-i18n="field.exportFormat">导出格式</span>
           <select id="exportFormatInput">
             <option value="jpeg" selected>JPEG</option>
             <option value="png">PNG</option>
@@ -110,48 +114,48 @@
 
         <div class="sliderGrid">
           <label>
-            <span>横幅宽度 <b id="bannerWidthValue">62.5%</b></span>
+            <span><span data-i18n="slider.bannerWidth">横幅宽度</span> <b id="bannerWidthValue">62.5%</b></span>
             <input id="bannerWidthInput" type="range" min="35" max="95" step="0.5" value="62.5" />
           </label>
           <label>
-            <span>横幅高度 <b id="bannerHeightValue">7.4%</b></span>
+            <span><span data-i18n="slider.bannerHeight">横幅高度</span> <b id="bannerHeightValue">7.4%</b></span>
             <input id="bannerHeightInput" type="range" min="4" max="15" step="0.001" value="7.407" />
           </label>
           <label>
-            <span>透明度 <b id="opacityValue">60%</b></span>
+            <span><span data-i18n="slider.opacity">透明度</span> <b id="opacityValue">60%</b></span>
             <input id="opacityInput" type="range" min="10" max="95" step="1" value="60" />
           </label>
           <label>
-            <span>左右页边距 <b id="pageMarginXValue">2.5%</b></span>
+            <span><span data-i18n="slider.marginX">左右页边距</span> <b id="pageMarginXValue">2.5%</b></span>
             <input id="pageMarginXInput" type="range" min="0" max="12" step="0.1" value="2.5" />
           </label>
           <label>
-            <span>上下页边距 <b id="pageMarginYValue">1.85%</b></span>
+            <span><span data-i18n="slider.marginY">上下页边距</span> <b id="pageMarginYValue">1.85%</b></span>
             <input id="pageMarginYInput" type="range" min="0" max="15" step="0.05" value="1.85" />
           </label>
           <label>
-            <span>间距 <b id="gapValue">1.85%</b></span>
+            <span><span data-i18n="slider.gap">间距</span> <b id="gapValue">1.85%</b></span>
             <input id="gapInput" type="range" min="0" max="6" step="0.001" value="1.852" />
           </label>
           <label>
-            <span>机身/镜头字号 <b id="infoFontValue">2.04%</b></span>
+            <span><span data-i18n="slider.infoFont">机身/镜头字号</span> <b id="infoFontValue">2.04%</b></span>
             <input id="infoFontInput" type="range" min="1.2" max="3.8" step="0.001" value="2.037" />
           </label>
           <label>
-            <span>参数字号 <b id="paramFontValue">2.6%</b></span>
+            <span><span data-i18n="slider.paramFont">参数字号</span> <b id="paramFontValue">2.6%</b></span>
             <input id="paramFontInput" type="range" min="1.6" max="4.2" step="0.001" value="2.593" />
           </label>
           <label>
-            <span>JPEG 质量 <b id="qualityValue">92</b></span>
+            <span><span data-i18n="slider.jpegQuality">JPEG 质量</span> <b id="qualityValue">92</b></span>
             <input id="qualityInput" type="range" min="70" max="100" step="1" value="92" />
           </label>
           <label>
-            <span>导出分辨率 <b id="exportScaleValue">100%</b></span>
+            <span><span data-i18n="slider.exportScale">导出分辨率</span> <b id="exportScaleValue">100%</b></span>
             <input id="exportScaleInput" type="range" min="10" max="100" step="5" value="100" />
           </label>
         </div>
 
-        <label class="check full"><input id="shadowInput" type="checkbox" checked /> 图片阴影</label>
+        <label class="check full"><input id="shadowInput" type="checkbox" checked /> <span data-i18n="control.shadow">图片阴影</span></label>
       </aside>
     </main>
 
@@ -175,14 +179,14 @@
     <div id="exportCompleteDialog" class="dialogOverlay" role="dialog" aria-modal="true" aria-labelledby="exportCompleteTitle" hidden>
       <div class="dialogPanel">
         <div class="dialogIcon" aria-hidden="true">✓</div>
-        <h2 id="exportCompleteTitle">导出完成</h2>
-        <p id="exportCompleteSummary">已完成导出</p>
+        <h2 id="exportCompleteTitle" data-i18n="dialog.exportComplete">导出完成</h2>
+        <p id="exportCompleteSummary" data-i18n="dialog.exportCompleteSummary">已完成导出</p>
         <div class="dialogPath">
-          <span>保存位置</span>
+          <span data-i18n="dialog.saveLocation">保存位置</span>
           <div id="exportCompletePath" class="pathValue"></div>
         </div>
         <div class="dialogActions">
-          <button id="exportCompleteCloseBtn" type="button">完成</button>
+          <button id="exportCompleteCloseBtn" type="button" data-i18n="button.done">完成</button>
         </div>
       </div>
     </div>

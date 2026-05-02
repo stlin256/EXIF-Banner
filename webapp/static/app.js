@@ -36,6 +36,9 @@ const state = {
   wheelIdleTimer: 0,
   wheelDirection: 0,
   lastMoveDirection: 1,
+  language: "zh",
+  statusMessage: { key: "status.waitingScan", args: {} },
+  exportDialog: null,
 };
 
 const defaults = {
@@ -64,10 +67,152 @@ const defaults = {
   exportScalePct: 100,
 };
 
+const translations = {
+  zh: {
+    "placeholder.albumFolder": "选择相册文件夹",
+    "placeholder.logoPath": "留空则按相机品牌自动匹配",
+    "placeholder.brandText": "留空则自动读取相机品牌",
+    "button.pickAlbum": "选择相册",
+    "button.scan": "扫描",
+    "button.exportImages": "导出图片",
+    "button.exportPptx": "导出 PPTX",
+    "button.selectAll": "全选",
+    "button.clear": "清空",
+    "button.reset": "重置",
+    "button.pickLogo": "选择 Logo",
+    "button.done": "完成",
+    "control.recursive": "递归",
+    "control.shadow": "图片阴影",
+    "panel.photos": "照片",
+    "panel.banner": "横幅",
+    "empty.preview": "选择相册后开始预览",
+    "field.background": "背景色",
+    "field.bannerColor": "横幅色",
+    "field.logoPath": "Logo 路径",
+    "field.brandText": "品牌文字",
+    "field.aspectRatio": "底片比例",
+    "field.exportFormat": "导出格式",
+    "slider.bannerWidth": "横幅宽度",
+    "slider.bannerHeight": "横幅高度",
+    "slider.opacity": "透明度",
+    "slider.marginX": "左右页边距",
+    "slider.marginY": "上下页边距",
+    "slider.gap": "间距",
+    "slider.infoFont": "机身/镜头字号",
+    "slider.paramFont": "参数字号",
+    "slider.jpegQuality": "JPEG 质量",
+    "slider.exportScale": "导出分辨率",
+    "status.waitingScan": "等待扫描",
+    "status.ready": "就绪",
+    "status.folderSelected": "相册已选择，开始扫描",
+    "status.logoSelected": "Logo 已选择",
+    "status.loadingLastAlbum": "加载上次相册",
+    "status.scanningPhotos": "扫描照片",
+    "status.photoCount": "{count} 张照片",
+    "status.lastAlbumUnavailable": "上次相册不可用",
+    "status.error": "出错",
+    "status.exportedImages": "已导出 {count} 张图片",
+    "status.exportedPptx": "已导出 {count} 页 PPTX",
+    "status.exporting": "导出中",
+    "busy.processing": "处理中",
+    "file.notSelected": "未选择",
+    "error.requestFailed": "请求失败",
+    "error.previewRenderFailed": "预览渲染失败",
+    "error.exportFailed": "导出失败",
+    "alert.selectPhotos": "请先勾选要导出的照片。",
+    "toast.currentCameraBrand": "当前相机品牌",
+    "toast.missingLogo": "未找到 {brand} 的内置 Logo，可手动选择 Logo。",
+    "exif.none": "无 EXIF",
+    "export.images": "导出图片",
+    "export.pptx": "导出 PPTX",
+    "dialog.exportComplete": "导出完成",
+    "dialog.exportCompleteSummary": "已完成导出",
+    "dialog.imagesComplete": "图片导出完成",
+    "dialog.pptxComplete": "PPTX 导出完成",
+    "dialog.saveLocation": "保存位置",
+    "progress.prepareExport": "准备导出",
+    "progress.exportComplete": "导出完成",
+    "progress.exportFailed": "导出失败",
+    "progress.exportingImages": "导出图片 {done}/{total}",
+    "progress.renderingSlides": "渲染幻灯片 {done}/{total}",
+    "progress.writingPptx": "写入 PPTX",
+  },
+  en: {
+    "placeholder.albumFolder": "Select album folder",
+    "placeholder.logoPath": "Leave empty to match the camera brand",
+    "placeholder.brandText": "Leave empty to use the camera brand",
+    "button.pickAlbum": "Choose Album",
+    "button.scan": "Scan",
+    "button.exportImages": "Export Images",
+    "button.exportPptx": "Export PPTX",
+    "button.selectAll": "Select All",
+    "button.clear": "Clear",
+    "button.reset": "Reset",
+    "button.pickLogo": "Choose Logo",
+    "button.done": "Done",
+    "control.recursive": "Recursive",
+    "control.shadow": "Image Shadow",
+    "panel.photos": "Photos",
+    "panel.banner": "Banner",
+    "empty.preview": "Choose an album to start previewing",
+    "field.background": "Background",
+    "field.bannerColor": "Banner Color",
+    "field.logoPath": "Logo Path",
+    "field.brandText": "Brand Text",
+    "field.aspectRatio": "Canvas Ratio",
+    "field.exportFormat": "Export Format",
+    "slider.bannerWidth": "Banner Width",
+    "slider.bannerHeight": "Banner Height",
+    "slider.opacity": "Opacity",
+    "slider.marginX": "Side Margin",
+    "slider.marginY": "Top/Bottom Margin",
+    "slider.gap": "Gap",
+    "slider.infoFont": "Body/Lens Size",
+    "slider.paramFont": "Params Size",
+    "slider.jpegQuality": "JPEG Quality",
+    "slider.exportScale": "Export Scale",
+    "status.waitingScan": "Waiting to scan",
+    "status.ready": "Ready",
+    "status.folderSelected": "Album selected, scanning",
+    "status.logoSelected": "Logo selected",
+    "status.loadingLastAlbum": "Loading last album",
+    "status.scanningPhotos": "Scanning photos",
+    "status.photoCount": "{count} photos",
+    "status.lastAlbumUnavailable": "Last album unavailable",
+    "status.error": "Error",
+    "status.exportedImages": "Exported {count} images",
+    "status.exportedPptx": "Exported {count} PPTX slides",
+    "status.exporting": "Exporting",
+    "busy.processing": "Processing",
+    "file.notSelected": "Not selected",
+    "error.requestFailed": "Request failed",
+    "error.previewRenderFailed": "Preview render failed",
+    "error.exportFailed": "Export failed",
+    "alert.selectPhotos": "Select photos to export first.",
+    "toast.currentCameraBrand": "current camera brand",
+    "toast.missingLogo": "No built-in logo was found for {brand}. You can choose one manually.",
+    "exif.none": "No EXIF",
+    "export.images": "Export Images",
+    "export.pptx": "Export PPTX",
+    "dialog.exportComplete": "Export Complete",
+    "dialog.exportCompleteSummary": "Export finished",
+    "dialog.imagesComplete": "Image Export Complete",
+    "dialog.pptxComplete": "PPTX Export Complete",
+    "dialog.saveLocation": "Save Location",
+    "progress.prepareExport": "Preparing export",
+    "progress.exportComplete": "Export complete",
+    "progress.exportFailed": "Export failed",
+    "progress.exportingImages": "Exporting images {done}/{total}",
+    "progress.renderingSlides": "Rendering slides {done}/{total}",
+    "progress.writingPptx": "Writing PPTX",
+  },
+};
+
 const $ = (id) => document.getElementById(id);
 
 function init() {
   const saved = loadSavedState();
+  state.language = normalizeLanguage(saved.language || "zh");
   state.settings = { ...defaults, ...(saved.settings || {}) };
   migrateLayoutSettings(saved.settings || {});
   loadLogoRules();
@@ -75,6 +220,8 @@ function init() {
     $("folderInput").value = saved.folder;
   }
   $("recursiveInput").checked = !!saved.recursive;
+  $("languageInput").value = state.language;
+  $("languageInput").addEventListener("change", (event) => setLanguage(event.target.value));
   $("pickFolderBtn").addEventListener("click", pickFolder);
   $("pickLogoBtn").addEventListener("click", pickLogo);
   $("scanBtn").addEventListener("click", scan);
@@ -111,11 +258,67 @@ function init() {
   $("recursiveInput").addEventListener("change", scheduleSaveState);
   window.addEventListener("beforeunload", flushSavedState);
   writeSettings();
+  applyI18n();
   if (saved.folder) {
     loadLastProject();
   } else {
-    setIdle("等待扫描");
+    setIdle("status.waitingScan");
   }
+}
+
+function normalizeLanguage(language) {
+  return language === "en" ? "en" : "zh";
+}
+
+function setLanguage(language) {
+  state.language = normalizeLanguage(language);
+  applyI18n();
+  saveState();
+}
+
+function t(key, values = {}) {
+  const table = translations[state.language] || translations.zh;
+  const fallback = translations.zh[key] || key;
+  return (table[key] || fallback).replace(/\{(\w+)\}/g, (_, name) => {
+    return values[name] === undefined || values[name] === null ? "" : String(values[name]);
+  });
+}
+
+function hasTranslation(key) {
+  return typeof key === "string" && !!(translations.zh[key] || translations.en[key]);
+}
+
+function messageDescriptor(message, args = {}) {
+  if (message && typeof message === "object" && message.key) {
+    return { key: message.key, args: message.args || {} };
+  }
+  if (message && typeof message === "object" && Object.prototype.hasOwnProperty.call(message, "text")) {
+    return { text: String(message.text || "") };
+  }
+  if (hasTranslation(message)) {
+    return { key: message, args };
+  }
+  return { text: String(message || "") };
+}
+
+function messageText(message) {
+  return message?.key ? t(message.key, message.args || {}) : String(message?.text || "");
+}
+
+function applyI18n() {
+  document.documentElement.lang = state.language === "zh" ? "zh-CN" : "en";
+  $("languageInput").value = state.language;
+  for (const element of document.querySelectorAll("[data-i18n]")) {
+    element.textContent = t(element.dataset.i18n);
+  }
+  for (const element of document.querySelectorAll("[data-i18n-placeholder]")) {
+    element.placeholder = t(element.dataset.i18nPlaceholder);
+  }
+  if (!state.photos[state.current]) {
+    $("fileNameText").textContent = t("file.notSelected");
+  }
+  applyStatusMessage();
+  renderExportCompleteDialog();
 }
 
 function migrateLayoutSettings(savedSettings) {
@@ -165,7 +368,7 @@ async function api(path, payload = {}) {
   });
   const data = await response.json();
   if (!response.ok || data.error) {
-    throw new Error(data.error || "请求失败");
+    throw new Error(data.error || t("error.requestFailed"));
   }
   return data;
 }
@@ -192,11 +395,11 @@ async function pickFolder() {
     if (data.folder) {
       $("folderInput").value = data.folder;
       saveState();
-      setBusy("相册已选择，开始扫描");
+      setBusy("status.folderSelected");
       await nextFrame();
       await scan();
     } else {
-      setIdle("就绪");
+      setIdle("status.ready");
     }
   } catch (error) {
     showError(error);
@@ -211,9 +414,9 @@ async function pickLogo() {
       hideToast();
       readSettings();
       updatePreview();
-      setIdle("Logo 已选择");
+      setIdle("status.logoSelected");
     } else {
-      setIdle("就绪");
+      setIdle("status.ready");
     }
   } catch (error) {
     showError(error);
@@ -221,7 +424,7 @@ async function pickLogo() {
 }
 
 async function loadLastProject() {
-  setBusy("加载上次相册");
+  setBusy("status.loadingLastAlbum");
   await nextFrame();
   await scan({ auto: true });
 }
@@ -232,7 +435,7 @@ async function scan(options = {}) {
     $("folderInput").focus();
     return;
   }
-  setBusy("扫描照片");
+  setBusy("status.scanningPhotos");
   await nextFrame();
   try {
     const data = await api("/api/scan", {
@@ -256,10 +459,10 @@ async function scan(options = {}) {
     const restoredIndex = isSameProject(saved, folder, data.photos) ? Number(saved.current || 0) : 0;
     selectPhoto(Math.min(restoredIndex, Math.max(0, data.photos.length - 1)));
     updateSelectionUI();
-    setIdle(`${state.photos.length} 张照片`);
+    setIdle("status.photoCount", { count: state.photos.length });
   } catch (error) {
     if (options.auto) {
-      setIdle("上次相册不可用");
+      setIdle("status.lastAlbumUnavailable");
       console.error(error);
     } else {
       showError(error);
@@ -589,6 +792,7 @@ function saveState() {
       selection: [...state.selected],
       photoFingerprint: photoFingerprint(state.photos),
       settings: state.settings,
+      language: state.language,
     }));
   } catch {
     // Local storage can be disabled; the app still works without persistence.
@@ -755,7 +959,7 @@ async function fetchPreviewUrl(index) {
   })
     .then(async (response) => {
       if (!response.ok) {
-        throw new Error("预览渲染失败");
+        throw new Error(t("error.previewRenderFailed"));
       }
       const blob = await response.blob();
       const url = URL.createObjectURL(blob);
@@ -907,8 +1111,8 @@ function maybePromptMissingLogo(photo) {
     return;
   }
   state.missingLogoNotices.add(key);
-  const label = brand && brand !== "CAMERA" ? brand : "当前相机品牌";
-  showToast(`未找到 ${label} 的内置 Logo，可手动选择 Logo。`);
+  const label = brand && brand !== "CAMERA" ? brand : t("toast.currentCameraBrand");
+  showToast(t("toast.missingLogo", { brand: label }));
 }
 
 function matchedLogoRule(exif) {
@@ -964,7 +1168,7 @@ function formatParams(exif) {
   if (exif.fNumber) values.push(`F${escapeHtml(exif.fNumber)}`);
   if (exif.exposureTime) values.push(`${escapeHtml(exif.exposureTime)}s`);
   if (exif.iso) values.push(`ISO ${escapeHtml(exif.iso)}`);
-  return values.length ? values.join("&nbsp;&nbsp;&nbsp;&nbsp;") : "No EXIF";
+  return values.length ? values.join("&nbsp;&nbsp;&nbsp;&nbsp;") : t("exif.none");
 }
 
 function hexToRgba(hex, alpha) {
@@ -991,20 +1195,20 @@ async function exportAlbum(kind) {
   }
   const selection = [...state.selected].sort((a, b) => a - b);
   if (!selection.length) {
-    alert("请先勾选要导出的照片。");
+    alert(t("alert.selectPhotos"));
     return;
   }
 
   readSettings();
-  const label = kind === "images" ? "导出图片" : "导出 PPTX";
+  const labelKey = kind === "images" ? "export.images" : "export.pptx";
   try {
     const picked = await api("/api/pick-output-dir");
     if (!picked.folder) {
-      setIdle("就绪");
+      setIdle("status.ready");
       return;
     }
 
-    setBusy(label, 0);
+    setBusy(labelKey, 0);
     await nextFrame();
     const started = await api("/api/export/start", {
       kind,
@@ -1023,55 +1227,96 @@ async function pollExportJob(jobId, kind) {
   while (true) {
     await delay(350);
     const job = await api("/api/export/status", { jobId });
-    setBusy(job.message || "导出中", Number(job.progress || 0));
+    setBusy(localizeJobMessage(job.message) || "status.exporting", Number(job.progress || 0));
     if (job.status === "done") {
       const result = job.result || {};
       if (kind === "images") {
-        setIdle(`已导出 ${result.count || 0} 张图片`);
+        setIdle("status.exportedImages", { count: result.count || 0 });
       } else {
-        setIdle(`已导出 ${result.count || 0} 页 PPTX`);
+        setIdle("status.exportedPptx", { count: result.count || 0 });
       }
       showExportCompleteDialog(kind, result);
       return;
     }
     if (job.status === "error") {
-      throw new Error(job.error || "导出失败");
+      throw new Error(job.error || t("error.exportFailed"));
     }
   }
 }
 
-function setBusy(text, progress = null) {
-  $("statusText").textContent = text;
-  $("busyText").textContent = text;
+function localizeJobMessage(message) {
+  const text = String(message || "").trim();
+  const exact = {
+    "准备导出": "progress.prepareExport",
+    "导出完成": "progress.exportComplete",
+    "导出失败": "progress.exportFailed",
+    "写入 PPTX": "progress.writingPptx",
+  };
+  if (exact[text]) {
+    return { key: exact[text], args: {} };
+  }
+  let match = text.match(/^导出图片\s+(\d+)\/(\d+)$/);
+  if (match) {
+    return { key: "progress.exportingImages", args: { done: match[1], total: match[2] } };
+  }
+  match = text.match(/^渲染幻灯片\s+(\d+)\/(\d+)$/);
+  if (match) {
+    return { key: "progress.renderingSlides", args: { done: match[1], total: match[2] } };
+  }
+  return text ? { text } : null;
+}
+
+function setBusy(message, progress = null, args = {}) {
+  state.statusMessage = messageDescriptor(message, args);
   document.body.classList.add("busy");
+  applyStatusMessage();
   setProgress(progress);
 }
 
-function setIdle(text = "就绪") {
-  $("statusText").textContent = text;
+function setIdle(message = "status.ready", args = {}) {
+  state.statusMessage = messageDescriptor(message, args);
   document.body.classList.remove("busy");
+  applyStatusMessage();
   setProgress(null);
 }
 
+function applyStatusMessage() {
+  const text = messageText(state.statusMessage);
+  $("statusText").textContent = text;
+  $("busyText").textContent = document.body.classList.contains("busy") ? text : t("busy.processing");
+}
+
 function showError(error) {
-  setIdle("出错");
+  setIdle("status.error");
   alert(error.message || String(error));
 }
 
 function showExportCompleteDialog(kind, result) {
-  const isImages = kind === "images";
-  const count = Number(result.count || 0);
-  const targetPath = isImages ? result.outputDir || "" : result.outputFile || "";
-  $("exportCompleteTitle").textContent = isImages ? "图片导出完成" : "PPTX 导出完成";
-  $("exportCompleteSummary").textContent = isImages ? `已导出 ${count} 张图片` : `已导出 ${count} 页 PPTX`;
-  $("exportCompletePath").textContent = targetPath;
-  $("exportCompletePath").title = targetPath;
+  state.exportDialog = { kind, result };
+  renderExportCompleteDialog();
   $("exportCompleteDialog").hidden = false;
   $("exportCompleteCloseBtn").focus();
 }
 
+function renderExportCompleteDialog() {
+  if (!state.exportDialog) {
+    return;
+  }
+  const { kind, result } = state.exportDialog;
+  const isImages = kind === "images";
+  const count = Number(result.count || 0);
+  const targetPath = isImages ? result.outputDir || "" : result.outputFile || "";
+  $("exportCompleteTitle").textContent = isImages ? t("dialog.imagesComplete") : t("dialog.pptxComplete");
+  $("exportCompleteSummary").textContent = isImages
+    ? t("status.exportedImages", { count })
+    : t("status.exportedPptx", { count });
+  $("exportCompletePath").textContent = targetPath;
+  $("exportCompletePath").title = targetPath;
+}
+
 function hideExportCompleteDialog() {
   $("exportCompleteDialog").hidden = true;
+  state.exportDialog = null;
 }
 
 function nextFrame() {

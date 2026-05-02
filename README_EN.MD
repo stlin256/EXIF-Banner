@@ -100,7 +100,7 @@ To add a brand, place the logo image in `webapp/logos/` and add a rule to `logo-
 
 ### PPTX
 
-PPTX export uses `python-pptx` instead of handwritten PowerPoint package XML. Each slide contains one rendered composite image, making the deck suitable for presentation or slide-order editing.
+PPTX export uses `python-pptx`. Each slide contains one rendered composite image, making the deck suitable for presentation or slide-order editing.
 
 ## Preview Experience
 

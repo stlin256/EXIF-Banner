@@ -100,7 +100,7 @@ webapp/logos/logo-rules.json
 
 ### PPTX
 
-PPTX 由 `python-pptx` 生成，不再手写 PowerPoint 包结构。每页会放入一张已经合成好的横幅图片，便于直接演示或继续编辑页面顺序。
+PPTX 由 `python-pptx` 生成。每页会放入一张已经合成好的横幅图片，便于直接演示或继续编辑页面顺序。
 
 ## 预览体验
 
