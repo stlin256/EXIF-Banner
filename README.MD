@@ -1,10 +1,28 @@
 # EXIF-Banner
 
+[![Release](https://img.shields.io/github/v/release/stlin256/EXIF-Banner?label=release)](https://github.com/stlin256/EXIF-Banner/releases)
+
 [English](README_EN.MD)
 
 EXIF-Banner 是一个本地运行的照片参数横幅生成工具。它用浏览器作为交互界面，扫描本地相册，读取照片 EXIF 信息，并批量导出带拍摄参数横幅的图片或 PPTX。
 
+这个项目从早期的 [PPT-EXIF-Banner](https://github.com/stlin256/PPT-EXIF-Banner) PowerPoint 宏脚本发展而来。旧方案需要手动准备 ExifTool、手动运行 EXIF 导出，再在 Office 宏里指定图片、CSV、Logo 等路径；EXIF-Banner 把这些步骤整合为本地 Web 应用，减少宏安全设置、路径配置和批量操作上的不便。
+
 作者：[@stlin256](https://github.com/stlin256/EXIF-Banner)
+
+## 下载发布版
+
+Windows 用户可以直接下载单文件 EXE：
+
+[前往 GitHub Releases](https://github.com/stlin256/EXIF-Banner/releases)
+
+当前发布资产命名规则：
+
+```text
+EXIF-Banner-vX.Y.Z-windows-amd64.exe
+```
+
+下载后双击运行即可。程序会在本机启动 Web 服务并打开浏览器界面；照片扫描、横幅渲染和导出都在本地完成。
 
 ## 示例
 

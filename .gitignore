@@ -2,5 +2,13 @@ __pycache__/
 *.pyc
 *.log
 .python-packages/
+.build-tmp/
+.venv-build/
+.venv-pyinstaller/
+.venv-release/
+.venv-release-py314/
 .verify_output/
 banner_output/
+docs/releases/
+package/
+release/

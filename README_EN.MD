@@ -1,10 +1,28 @@
 # EXIF-Banner
 
+[![Release](https://img.shields.io/github/v/release/stlin256/EXIF-Banner?label=release)](https://github.com/stlin256/EXIF-Banner/releases)
+
 [中文](README.MD)
 
 EXIF-Banner is a local photo EXIF banner generator. It runs on your computer, uses the browser as the UI, scans local albums, reads EXIF metadata, and batch-exports composite images or PPTX decks with a clean parameter banner.
 
+This project evolved from the earlier [PPT-EXIF-Banner](https://github.com/stlin256/PPT-EXIF-Banner) PowerPoint macro workflow. The macro-based approach required manually preparing ExifTool, exporting EXIF data, and then configuring image, CSV, and logo paths inside Office. EXIF-Banner turns that workflow into a local web app, reducing friction from Office macro security settings, repeated path selection, and batch processing.
+
 Author: [@stlin256](https://github.com/stlin256/EXIF-Banner)
+
+## Download Release
+
+Windows users can download the single-file executable:
+
+[Go to GitHub Releases](https://github.com/stlin256/EXIF-Banner/releases)
+
+Release assets follow this naming convention:
+
+```text
+EXIF-Banner-vX.Y.Z-windows-amd64.exe
+```
+
+Download and double-click the executable. It starts a local web service and opens the browser UI; album scanning, rendering, and export all happen on your computer.
 
 ## Examples
 
