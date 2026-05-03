@@ -426,8 +426,13 @@ function applyI18n() {
   for (const element of document.querySelectorAll("[data-i18n-aria-label]")) {
     element.setAttribute("aria-label", t(element.dataset.i18nAriaLabel));
   }
-  if (!state.photos[state.current]) {
+  if (state.photos[state.current]) {
+    updateMetaStrip(state.photos[state.current]);
+  } else {
     $("fileNameText").textContent = t("file.notSelected");
+    $("fileNameText").title = "";
+    $("captureDateText").textContent = "";
+    $("captureDateText").title = "";
   }
   updateSortControl();
   applyStatusMessage();
@@ -972,10 +977,44 @@ function updatePreview() {
     objectFit: "contain",
   });
 
-  $("fileNameText").textContent = photo.name;
-  $("fileNameText").title = photo.name;
+  updateMetaStrip(photo);
   maybePromptMissingLogo(photo);
   scheduleServerPreview();
+}
+
+function updateMetaStrip(photo) {
+  const fileName = photo?.name || t("file.notSelected");
+  const captureDate = formatCaptureDate(photo?.exif?.dateTime);
+  $("fileNameText").textContent = fileName;
+  $("fileNameText").title = photo?.name || "";
+  $("captureDateText").textContent = captureDate;
+  $("captureDateText").title = captureDate;
+}
+
+function formatCaptureDate(value) {
+  const parts = parseCaptureDate(value);
+  if (!parts) {
+    return "";
+  }
+  if (state.language === "en") {
+    return `${parts.year}-${parts.month}-${parts.day} ${parts.hour}:${parts.minute}`;
+  }
+  return `${parts.year}年${parts.month}月${parts.day}日${parts.hour}时${parts.minute}分`;
+}
+
+function parseCaptureDate(value) {
+  const text = String(value || "").trim();
+  const match = text.match(/^(\d{4})[:-](\d{2})[:-](\d{2})(?:[ T](\d{2}):(\d{2}))?/);
+  if (!match) {
+    return null;
+  }
+  return {
+    year: match[1],
+    month: match[2],
+    day: match[3],
+    hour: match[4] || "00",
+    minute: match[5] || "00",
+  };
 }
 
 function applySlideAspect(canvas) {

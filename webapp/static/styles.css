@@ -493,6 +493,15 @@ input[type="color"] {
   white-space: nowrap;
 }
 
+#captureDateText {
+  flex: 0 0 auto;
+  max-width: 42%;
+  overflow: hidden;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .field,
 .sliderGrid label {
   display: grid;
