@@ -37,12 +37,30 @@
           <div>
             <span data-i18n="panel.photos">照片</span>
             <span id="countText">0/0</span>
-            <select id="sortInput" class="sortSelect" aria-label="Sort photos">
-              <option value="dateAsc" data-i18n="sort.dateAsc">时间 ↑</option>
-              <option value="dateDesc" data-i18n="sort.dateDesc">时间 ↓</option>
-              <option value="nameAsc" data-i18n="sort.nameAsc">A-Z</option>
-              <option value="nameDesc" data-i18n="sort.nameDesc">Z-A</option>
-            </select>
+            <div id="sortControl" class="sortControl">
+              <button id="sortButton" class="sortButton" type="button" aria-haspopup="menu" aria-expanded="false" data-i18n-title="sort.dateAsc" data-i18n-aria-label="sort.dateAsc">
+                <span id="sortIcon" class="sortIcon" aria-hidden="true"></span>
+                <span id="sortChevron" class="sortChevron" aria-hidden="true"></span>
+              </button>
+              <div id="sortMenu" class="sortMenu" role="menu" hidden>
+                <button class="sortMenuItem" type="button" role="menuitemradio" data-sort-mode="dateAsc">
+                  <span class="sortMenuIcon" data-sort-icon="dateAsc" aria-hidden="true"></span>
+                  <span data-i18n="sort.dateAsc">时间 ↑</span>
+                </button>
+                <button class="sortMenuItem" type="button" role="menuitemradio" data-sort-mode="dateDesc">
+                  <span class="sortMenuIcon" data-sort-icon="dateDesc" aria-hidden="true"></span>
+                  <span data-i18n="sort.dateDesc">时间 ↓</span>
+                </button>
+                <button class="sortMenuItem" type="button" role="menuitemradio" data-sort-mode="nameAsc">
+                  <span class="sortMenuIcon" data-sort-icon="nameAsc" aria-hidden="true"></span>
+                  <span data-i18n="sort.nameAsc">A-Z</span>
+                </button>
+                <button class="sortMenuItem" type="button" role="menuitemradio" data-sort-mode="nameDesc">
+                  <span class="sortMenuIcon" data-sort-icon="nameDesc" aria-hidden="true"></span>
+                  <span data-i18n="sort.nameDesc">Z-A</span>
+                </button>
+              </div>
+            </div>
           </div>
           <div class="selectionActions">
             <button id="selectAllBtn" type="button" data-i18n="button.selectAll">全选</button>
@@ -198,6 +216,7 @@
     </div>
     <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
 
+    <script src="/static/lucide-local.js"></script>
     <script src="/static/app.js"></script>
   </body>
 </html>

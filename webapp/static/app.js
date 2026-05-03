@@ -217,6 +217,13 @@ const translations = {
   },
 };
 
+const sortIconNames = {
+  dateAsc: "calendar-arrow-up",
+  dateDesc: "calendar-arrow-down",
+  nameAsc: "arrow-up-a-z",
+  nameDesc: "arrow-down-z-a",
+};
+
 const $ = (id) => document.getElementById(id);
 
 function init() {
@@ -230,10 +237,9 @@ function init() {
     $("folderInput").value = saved.folder;
   }
   $("recursiveInput").checked = !!saved.recursive;
-  $("sortInput").value = state.sortMode;
   $("languageInput").value = state.language;
   $("languageInput").addEventListener("change", (event) => setLanguage(event.target.value));
-  $("sortInput").addEventListener("change", handleSortChange);
+  setupSortControl();
   $("pickFolderBtn").addEventListener("click", pickFolder);
   $("pickLogoBtn").addEventListener("click", pickLogo);
   $("scanBtn").addEventListener("click", scan);
@@ -286,6 +292,90 @@ function normalizeSortMode(sortMode) {
   return ["dateAsc", "dateDesc", "nameAsc", "nameDesc"].includes(sortMode) ? sortMode : "dateAsc";
 }
 
+function setupSortControl() {
+  const control = $("sortControl");
+  const button = $("sortButton");
+  const menu = $("sortMenu");
+  control.addEventListener("click", (event) => event.stopPropagation());
+  button.addEventListener("click", toggleSortMenu);
+  button.addEventListener("keydown", (event) => {
+    if (event.key === "ArrowDown" || event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      openSortMenu();
+      menu.querySelector(".sortMenuItem.active")?.focus();
+    }
+  });
+  menu.addEventListener("click", (event) => {
+    const item = event.target.closest("[data-sort-mode]");
+    if (item) {
+      selectSortMode(item.dataset.sortMode).catch(showError);
+    }
+  });
+  document.addEventListener("click", closeSortMenu);
+  renderSortMenuIcons();
+  setLocalIcon($("sortChevron"), "chevron-down");
+  updateSortControl();
+}
+
+function toggleSortMenu() {
+  if ($("sortMenu").hidden) {
+    openSortMenu();
+  } else {
+    closeSortMenu();
+  }
+}
+
+function openSortMenu() {
+  $("sortMenu").hidden = false;
+  $("sortButton").setAttribute("aria-expanded", "true");
+}
+
+function closeSortMenu() {
+  $("sortMenu").hidden = true;
+  $("sortButton").setAttribute("aria-expanded", "false");
+}
+
+function updateSortControl() {
+  const mode = normalizeSortMode(state.sortMode);
+  const labelKey = `sort.${mode}`;
+  setLocalIcon($("sortIcon"), sortIconNames[mode] || sortIconNames.dateAsc);
+  $("sortButton").dataset.i18nTitle = labelKey;
+  $("sortButton").dataset.i18nAriaLabel = labelKey;
+  $("sortButton").title = t(labelKey);
+  $("sortButton").setAttribute("aria-label", t(labelKey));
+  for (const item of document.querySelectorAll(".sortMenuItem")) {
+    const active = item.dataset.sortMode === mode;
+    item.classList.toggle("active", active);
+    item.setAttribute("aria-checked", active ? "true" : "false");
+  }
+}
+
+function renderSortMenuIcons() {
+  for (const element of document.querySelectorAll("[data-sort-icon]")) {
+    setLocalIcon(element, sortIconNames[element.dataset.sortIcon]);
+  }
+}
+
+function setLocalIcon(element, name) {
+  if (element && name && window.EXIFBannerIcons) {
+    window.EXIFBannerIcons.replace(element, name);
+  }
+}
+
+async function selectSortMode(sortMode) {
+  const nextMode = normalizeSortMode(sortMode);
+  closeSortMenu();
+  if (nextMode === state.sortMode) {
+    return;
+  }
+  state.sortMode = nextMode;
+  updateSortControl();
+  saveState();
+  if ($("folderInput").value.trim()) {
+    await scan();
+  }
+}
+
 function setLanguage(language) {
   state.language = normalizeLanguage(language);
   applyI18n();
@@ -330,9 +420,16 @@ function applyI18n() {
   for (const element of document.querySelectorAll("[data-i18n-placeholder]")) {
     element.placeholder = t(element.dataset.i18nPlaceholder);
   }
+  for (const element of document.querySelectorAll("[data-i18n-title]")) {
+    element.title = t(element.dataset.i18nTitle);
+  }
+  for (const element of document.querySelectorAll("[data-i18n-aria-label]")) {
+    element.setAttribute("aria-label", t(element.dataset.i18nAriaLabel));
+  }
   if (!state.photos[state.current]) {
     $("fileNameText").textContent = t("file.notSelected");
   }
+  updateSortControl();
   applyStatusMessage();
   renderExportCompleteDialog();
 }
@@ -494,14 +591,6 @@ function isSameProject(saved, folder, photos = state.photos) {
     normalizeSortMode(saved.sortMode) === state.sortMode &&
     (!saved.photoFingerprint || saved.photoFingerprint === photoFingerprint(photos))
   );
-}
-
-async function handleSortChange() {
-  state.sortMode = normalizeSortMode($("sortInput").value);
-  saveState();
-  if ($("folderInput").value.trim()) {
-    await scan();
-  }
 }
 
 function restoredSelection(photos, saved, folder) {
@@ -686,6 +775,12 @@ function resetWheelBuffer() {
 }
 
 function handleKeyNavigation(event) {
+  if (event.key === "Escape" && !$("sortMenu").hidden) {
+    event.preventDefault();
+    closeSortMenu();
+    $("sortButton").focus();
+    return;
+  }
   if (event.key === "Escape" && !$("exportCompleteDialog").hidden) {
     event.preventDefault();
     hideExportCompleteDialog();
