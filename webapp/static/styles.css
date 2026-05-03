@@ -144,8 +144,24 @@ input[type="color"] {
   gap: 8px;
 }
 
-.languageSelect {
-  min-width: 96px;
+.languageButton {
+  width: 38px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.languageIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.languageIcon svg {
+  width: 18px;
+  height: 18px;
 }
 
 .actions button:last-child,

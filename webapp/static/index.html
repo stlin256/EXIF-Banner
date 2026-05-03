@@ -22,10 +22,9 @@
         <button id="scanBtn" type="button" data-i18n="button.scan">扫描</button>
       </div>
       <div class="actions">
-        <select id="languageInput" class="languageSelect" aria-label="Language">
-          <option value="zh">中文</option>
-          <option value="en">English</option>
-        </select>
+        <button id="languageButton" class="languageButton" type="button" data-i18n-title="button.switchLanguage" data-i18n-aria-label="button.switchLanguage">
+          <span id="languageIcon" class="languageIcon" aria-hidden="true"></span>
+        </button>
         <button id="exportImagesBtn" type="button" disabled data-i18n="button.exportImages">导出图片</button>
         <button id="exportPptxBtn" type="button" disabled data-i18n="button.exportPptx">导出 PPTX</button>
       </div>

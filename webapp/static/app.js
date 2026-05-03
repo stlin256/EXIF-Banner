@@ -82,6 +82,7 @@ const translations = {
     "button.reset": "重置",
     "button.pickLogo": "选择 Logo",
     "button.done": "完成",
+    "button.switchLanguage": "切换语言",
     "control.recursive": "递归",
     "control.shadow": "图片阴影",
     "panel.photos": "照片",
@@ -155,6 +156,7 @@ const translations = {
     "button.reset": "Reset",
     "button.pickLogo": "Choose Logo",
     "button.done": "Done",
+    "button.switchLanguage": "Switch Language",
     "control.recursive": "Recursive",
     "control.shadow": "Image Shadow",
     "panel.photos": "Photos",
@@ -237,8 +239,7 @@ function init() {
     $("folderInput").value = saved.folder;
   }
   $("recursiveInput").checked = !!saved.recursive;
-  $("languageInput").value = state.language;
-  $("languageInput").addEventListener("change", (event) => setLanguage(event.target.value));
+  setupLanguageControl();
   setupSortControl();
   $("pickFolderBtn").addEventListener("click", pickFolder);
   $("pickLogoBtn").addEventListener("click", pickLogo);
@@ -286,6 +287,15 @@ function init() {
 
 function normalizeLanguage(language) {
   return language === "en" ? "en" : "zh";
+}
+
+function setupLanguageControl() {
+  $("languageButton").addEventListener("click", toggleLanguage);
+  setLocalIcon($("languageIcon"), "languages");
+}
+
+function toggleLanguage() {
+  setLanguage(state.language === "zh" ? "en" : "zh");
 }
 
 function normalizeSortMode(sortMode) {
@@ -413,7 +423,6 @@ function messageText(message) {
 
 function applyI18n() {
   document.documentElement.lang = state.language === "zh" ? "zh-CN" : "en";
-  $("languageInput").value = state.language;
   for (const element of document.querySelectorAll("[data-i18n]")) {
     element.textContent = t(element.dataset.i18n);
   }
