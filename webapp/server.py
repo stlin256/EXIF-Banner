@@ -408,7 +408,43 @@ def resolve_nikon_lens(lens_id: int, lens_info: Any, lens_text: Any) -> str:
         matches = sorted({name for _, name in candidates if lens_signature_from_text(name) == signature})
         if len(matches) == 1:
             return matches[0]
+        collapsed = collapse_lens_variant_names(matches)
+        if collapsed:
+            return collapsed
     return ""
+
+
+def collapse_lens_variant_names(names: list[str]) -> str:
+    if len(names) < 2:
+        return ""
+    ordered = sorted(set(names), key=lambda value: (len(value), value.casefold()))
+    base = ordered[0]
+    suffixes: list[str] = []
+    for name in ordered[1:]:
+        if not name.startswith(f"{base} "):
+            return ""
+        suffix = name[len(base) :].strip(" -/")
+        if not suffix or not is_lens_variant_suffix(suffix):
+            return ""
+        suffixes.append(suffix)
+    return f"{base} / {' / '.join(suffixes)}" if suffixes else ""
+
+
+def is_lens_variant_suffix(value: str) -> bool:
+    tokens = {token.upper() for token in re.findall(r"[A-Za-z0-9]+", value)}
+    return bool(tokens) and tokens.issubset(
+        {
+            "APO",
+            "II",
+            "III",
+            "IS",
+            "OIS",
+            "OS",
+            "OSS",
+            "VC",
+            "VR",
+        }
+    )
 
 
 BRAND_ALIASES = {
