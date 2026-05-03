@@ -22,7 +22,7 @@ Download and double-click the executable. It starts a local web service and open
 
 Editor interface:
 
-![EXIF-Banner editor interface](images/webpage.png)
+![EXIF-Banner editor interface](images/webpage_en.png)
 
 Example images:
 
