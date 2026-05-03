@@ -40,6 +40,7 @@ if LOCAL_PACKAGES_DIR.exists():
     sys.path.insert(0, str(LOCAL_PACKAGES_DIR))
 IMAGE_EXTENSIONS = {".jpg", ".jpeg"}
 LOGO_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
+SORT_MODES = {"dateAsc", "dateDesc", "nameAsc", "nameDesc"}
 SESSIONS: dict[str, dict[str, Any]] = {}
 EXPORT_JOBS: dict[str, dict[str, Any]] = {}
 EXPORT_LOCK = Lock()
@@ -121,6 +122,11 @@ def list_images(folder: Path, recursive: bool) -> list[Path]:
 
 def natural_key(value: str) -> list[Any]:
     return [int(text) if text.isdigit() else text.casefold() for text in re.split(r"(\d+)", value)]
+
+
+def normalize_sort_mode(value: Any) -> str:
+    text = clean_text(value)
+    return text if text in SORT_MODES else "dateAsc"
 
 
 def find_exiftool(root: Path) -> str | None:
@@ -1112,9 +1118,10 @@ def ellipsize(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.ImageFont, m
     return suffix
 
 
-def scan_album(folder: Path, recursive: bool) -> dict[str, Any]:
+def scan_album(folder: Path, recursive: bool, sort_mode: str = "dateAsc") -> dict[str, Any]:
     if not folder.exists() or not folder.is_dir():
         raise ValueError("Folder does not exist.")
+    sort_mode = normalize_sort_mode(sort_mode)
     paths = list_images(folder, recursive)
     exif_map, exif_source = read_exif_batch(paths, folder, recursive)
     photos: list[dict[str, Any]] = []
@@ -1137,12 +1144,16 @@ def scan_album(folder: Path, recursive: bool) -> dict[str, Any]:
             exif=metadata,
         )
         photos.append(photo.__dict__)
+    photos = sort_photos(photos, sort_mode)
+    for index, photo in enumerate(photos):
+        photo["index"] = index
     album_id = uuid.uuid4().hex
     SESSIONS[album_id] = {
         "root": str(folder),
         "photos": photos,
         "created": time.time(),
         "recursive": recursive,
+        "sortMode": sort_mode,
         "exifSource": exif_source,
     }
     return {
@@ -1150,10 +1161,53 @@ def scan_album(folder: Path, recursive: bool) -> dict[str, Any]:
         "root": str(folder),
         "count": len(photos),
         "recursive": recursive,
+        "sortMode": sort_mode,
         "exifSource": exif_source,
         "photos": public_photos(photos),
         "settings": DEFAULT_SETTINGS,
     }
+
+
+def sort_photos(photos: list[dict[str, Any]], sort_mode: str) -> list[dict[str, Any]]:
+    if sort_mode == "nameAsc":
+        return sorted(photos, key=lambda photo: natural_key(str(photo.get("name", ""))))
+    if sort_mode == "nameDesc":
+        return sorted(photos, key=lambda photo: natural_key(str(photo.get("name", ""))), reverse=True)
+    descending = sort_mode == "dateDesc"
+    return sorted(photos, key=lambda photo: photo_time_key(photo, descending))
+
+
+def photo_time_key(photo: dict[str, Any], descending: bool = False) -> tuple[int, float, list[Any]]:
+    timestamp = exif_timestamp(photo.get("exif", {}).get("dateTime"))
+    if timestamp is None:
+        try:
+            timestamp = Path(str(photo.get("path", ""))).stat().st_mtime
+        except OSError:
+            timestamp = None
+    if timestamp is None:
+        return (1, 0.0, natural_key(str(photo.get("name", ""))))
+    return (0, -timestamp if descending else timestamp, natural_key(str(photo.get("name", ""))))
+
+
+def exif_timestamp(value: Any) -> float | None:
+    text = clean_text(value).strip()
+    if not text:
+        return None
+    text = re.sub(r"\s+[A-Z]{2,5}$", "", text)
+    candidates = [text, text.replace(":", "-", 2)]
+    for candidate in candidates:
+        candidate = candidate.replace("T", " ")
+        candidate = re.sub(r"([+-]\d{2}):?(\d{2})$", r"\1:\2", candidate)
+        try:
+            return datetime.fromisoformat(candidate).timestamp()
+        except ValueError:
+            pass
+        for fmt in ("%Y:%m:%d %H:%M:%S", "%Y-%m-%d %H:%M:%S", "%Y:%m:%d %H:%M", "%Y-%m-%d %H:%M"):
+            try:
+                return datetime.strptime(candidate, fmt).timestamp()
+            except ValueError:
+                pass
+    return None
 
 
 def public_photos(photos: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -1812,7 +1866,7 @@ class Handler(SimpleHTTPRequestHandler):
             if parsed.path == "/api/scan":
                 folder = Path(clean_text(payload.get("folder"))).expanduser()
                 recursive = bool(payload.get("recursive"))
-                return self.send_json(scan_album(folder, recursive))
+                return self.send_json(scan_album(folder, recursive, clean_text(payload.get("sortMode"))))
             if parsed.path == "/api/export/start":
                 return self.send_json(start_export_job(payload))
             if parsed.path == "/api/export/status":

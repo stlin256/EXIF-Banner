@@ -193,8 +193,9 @@ input[type="color"] {
 
 .photoHead > div:first-child {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
+  min-width: 0;
 }
 
 .panelHead span:first-child {
@@ -211,6 +212,17 @@ input[type="color"] {
 .selectionActions {
   display: flex;
   gap: 6px;
+}
+
+.sortSelect {
+  width: 74px;
+  height: 28px;
+  padding: 0 22px 0 8px;
+  border-color: var(--line);
+  background-color: #faf9f6;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .photoList {

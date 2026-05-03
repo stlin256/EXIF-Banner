@@ -37,6 +37,12 @@
           <div>
             <span data-i18n="panel.photos">照片</span>
             <span id="countText">0/0</span>
+            <select id="sortInput" class="sortSelect" aria-label="Sort photos">
+              <option value="dateAsc" data-i18n="sort.dateAsc">时间 ↑</option>
+              <option value="dateDesc" data-i18n="sort.dateDesc">时间 ↓</option>
+              <option value="nameAsc" data-i18n="sort.nameAsc">A-Z</option>
+              <option value="nameDesc" data-i18n="sort.nameDesc">Z-A</option>
+            </select>
           </div>
           <div class="selectionActions">
             <button id="selectAllBtn" type="button" data-i18n="button.selectAll">全选</button>

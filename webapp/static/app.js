@@ -37,6 +37,7 @@ const state = {
   wheelDirection: 0,
   lastMoveDirection: 1,
   language: "zh",
+  sortMode: "dateAsc",
   statusMessage: { key: "status.waitingScan", args: {} },
   exportDialog: null,
 };
@@ -85,6 +86,10 @@ const translations = {
     "control.shadow": "图片阴影",
     "panel.photos": "照片",
     "panel.banner": "横幅",
+    "sort.dateAsc": "时间 ↑",
+    "sort.dateDesc": "时间 ↓",
+    "sort.nameAsc": "A-Z",
+    "sort.nameDesc": "Z-A",
     "empty.preview": "选择相册后开始预览",
     "field.background": "背景色",
     "field.bannerColor": "横幅色",
@@ -154,6 +159,10 @@ const translations = {
     "control.shadow": "Image Shadow",
     "panel.photos": "Photos",
     "panel.banner": "Banner",
+    "sort.dateAsc": "Date ↑",
+    "sort.dateDesc": "Date ↓",
+    "sort.nameAsc": "A-Z",
+    "sort.nameDesc": "Z-A",
     "empty.preview": "Choose an album to start previewing",
     "field.background": "Background",
     "field.bannerColor": "Banner Color",
@@ -213,6 +222,7 @@ const $ = (id) => document.getElementById(id);
 function init() {
   const saved = loadSavedState();
   state.language = normalizeLanguage(saved.language || "zh");
+  state.sortMode = normalizeSortMode(saved.sortMode);
   state.settings = { ...defaults, ...(saved.settings || {}) };
   migrateLayoutSettings(saved.settings || {});
   loadLogoRules();
@@ -220,8 +230,10 @@ function init() {
     $("folderInput").value = saved.folder;
   }
   $("recursiveInput").checked = !!saved.recursive;
+  $("sortInput").value = state.sortMode;
   $("languageInput").value = state.language;
   $("languageInput").addEventListener("change", (event) => setLanguage(event.target.value));
+  $("sortInput").addEventListener("change", handleSortChange);
   $("pickFolderBtn").addEventListener("click", pickFolder);
   $("pickLogoBtn").addEventListener("click", pickLogo);
   $("scanBtn").addEventListener("click", scan);
@@ -268,6 +280,10 @@ function init() {
 
 function normalizeLanguage(language) {
   return language === "en" ? "en" : "zh";
+}
+
+function normalizeSortMode(sortMode) {
+  return ["dateAsc", "dateDesc", "nameAsc", "nameDesc"].includes(sortMode) ? sortMode : "dateAsc";
 }
 
 function setLanguage(language) {
@@ -441,6 +457,7 @@ async function scan(options = {}) {
     const data = await api("/api/scan", {
       folder,
       recursive: $("recursiveInput").checked,
+      sortMode: state.sortMode,
     });
     state.albumId = data.albumId;
     state.root = data.root;
@@ -474,8 +491,17 @@ function isSameProject(saved, folder, photos = state.photos) {
   return (
     saved.folder === folder &&
     !!saved.recursive === $("recursiveInput").checked &&
+    normalizeSortMode(saved.sortMode) === state.sortMode &&
     (!saved.photoFingerprint || saved.photoFingerprint === photoFingerprint(photos))
   );
+}
+
+async function handleSortChange() {
+  state.sortMode = normalizeSortMode($("sortInput").value);
+  saveState();
+  if ($("folderInput").value.trim()) {
+    await scan();
+  }
 }
 
 function restoredSelection(photos, saved, folder) {
@@ -788,6 +814,7 @@ function saveState() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify({
       folder: $("folderInput").value.trim(),
       recursive: $("recursiveInput").checked,
+      sortMode: state.sortMode,
       current: state.current,
       selection: [...state.selected],
       photoFingerprint: photoFingerprint(state.photos),
