@@ -26,6 +26,11 @@ const state = {
   previewWarmGeneration: 0,
   previewWarmRadius: 24,
   previewWarmConcurrency: 2,
+  bannerLayoutSerial: 0,
+  bannerLayoutCache: new Map(),
+  bannerLayoutRequests: new Map(),
+  bannerLayoutCacheLimit: 72,
+  bannerEditTimer: 0,
   photoItems: new Map(),
   activePhotoItem: null,
   saveTimer: 0,
@@ -62,6 +67,7 @@ const defaults = {
   brandFontPct: 5.556,
   logoPath: "",
   brandText: "",
+  bannerTextOverrides: {},
   shadow: true,
   quality: 92,
   exportFormat: "jpeg",
@@ -85,6 +91,10 @@ const translations = {
     "button.switchLanguage": "切换语言",
     "control.recursive": "递归",
     "control.shadow": "图片阴影",
+    "edit.brand": "编辑品牌文字",
+    "edit.model": "编辑相机型号",
+    "edit.lens": "编辑镜头型号",
+    "edit.params": "编辑拍摄参数",
     "panel.photos": "照片",
     "panel.banner": "横幅",
     "sort.dateAsc": "时间 ↑",
@@ -159,6 +169,10 @@ const translations = {
     "button.switchLanguage": "Switch Language",
     "control.recursive": "Recursive",
     "control.shadow": "Image Shadow",
+    "edit.brand": "Edit brand text",
+    "edit.model": "Edit camera model",
+    "edit.lens": "Edit lens model",
+    "edit.params": "Edit exposure parameters",
     "panel.photos": "Photos",
     "panel.banner": "Banner",
     "sort.dateAsc": "Date ↑",
@@ -255,6 +269,7 @@ function init() {
       hideExportCompleteDialog();
     }
   });
+  setupBannerEditing();
   $("previewStage").addEventListener("wheel", handlePreviewWheel, { passive: false });
   document.addEventListener("keydown", handleKeyNavigation);
 
@@ -300,6 +315,16 @@ function toggleLanguage() {
 
 function normalizeSortMode(sortMode) {
   return ["dateAsc", "dateDesc", "nameAsc", "nameDesc"].includes(sortMode) ? sortMode : "dateAsc";
+}
+
+function setupBannerEditing() {
+  for (const field of bannerEditFields()) {
+    field.addEventListener("focus", handleBannerEditFocus);
+    field.addEventListener("input", handleBannerEditInput);
+    field.addEventListener("blur", handleBannerEditBlur);
+    field.addEventListener("keydown", handleBannerEditKeydown);
+    field.addEventListener("paste", pastePlainText);
+  }
 }
 
 function setupSortControl() {
@@ -437,11 +462,13 @@ function applyI18n() {
   }
   if (state.photos[state.current]) {
     updateMetaStrip(state.photos[state.current]);
+    updateBannerEditLayer(state.photos[state.current]);
   } else {
     $("fileNameText").textContent = t("file.notSelected");
     $("fileNameText").title = "";
     $("captureDateText").textContent = "";
     $("captureDateText").title = "";
+    $("bannerEditLayer").hidden = true;
   }
   updateSortControl();
   applyStatusMessage();
@@ -512,6 +539,9 @@ async function loadLogoRules() {
     state.logoRules = [];
   } finally {
     state.logoRulesLoaded = true;
+    if (state.photos[state.current]) {
+      updateBannerEditLayer(state.photos[state.current]);
+    }
     maybePromptMissingLogo(state.photos[state.current]);
   }
 }
@@ -816,6 +846,9 @@ function isTypingTarget(target) {
   if (!target || !target.tagName) {
     return false;
   }
+  if (target.isContentEditable) {
+    return true;
+  }
   return ["INPUT", "TEXTAREA", "SELECT", "BUTTON"].includes(target.tagName);
 }
 
@@ -987,8 +1020,284 @@ function updatePreview() {
   });
 
   updateMetaStrip(photo);
+  updateBannerEditLayer(photo);
   maybePromptMissingLogo(photo);
   scheduleServerPreview();
+}
+
+function updateBannerEditLayer(photo) {
+  const layer = $("bannerEditLayer");
+  if (!photo || !state.albumId) {
+    layer.hidden = true;
+    return;
+  }
+
+  const index = state.current;
+  const key = previewCacheKey(index);
+  const cached = state.bannerLayoutCache.get(key);
+  if (cached) {
+    applyBannerEditLayout(photo, cached);
+    return;
+  }
+
+  const serial = ++state.bannerLayoutSerial;
+  layer.hidden = true;
+  fetchBannerEditLayout(index)
+    .then((layout) => {
+      if (serial !== state.bannerLayoutSerial || index !== state.current) {
+        return;
+      }
+      applyBannerEditLayout(photo, layout);
+    })
+    .catch((error) => {
+      console.error(error);
+      if (serial === state.bannerLayoutSerial) {
+        layer.hidden = true;
+      }
+    });
+}
+
+function applyBannerEditLayout(photo, layout) {
+  const layer = $("bannerEditLayer");
+  if (!layout?.fields) {
+    layer.hidden = true;
+    return;
+  }
+
+  layer.hidden = false;
+  Object.assign(layer.style, {
+    left: "0",
+    top: "0",
+    width: "100%",
+    height: "100%",
+  });
+
+  const canvasHeight = $("slideCanvas").getBoundingClientRect().height || Number(layout.slideHeight || 0);
+  const scaleY = canvasHeight / Math.max(1, Number(layout.slideHeight || 1));
+  const texts = bannerTexts(photo);
+  const defaultTexts = defaultBannerTexts(photo);
+  const elements = {
+    brand: $("brandEditField"),
+    model: $("modelEditField"),
+    lens: $("lensEditField"),
+    params: $("paramsEditField"),
+  };
+
+  for (const [name, element] of Object.entries(elements)) {
+    const rect = layout.fields[name];
+    element.hidden = !rect || !!rect.hidden;
+    if (!rect || rect.hidden) {
+      continue;
+    }
+    element.dataset.defaultValue = defaultTexts[name] || "";
+    element.dataset.currentValue = texts[name] || "";
+    element.setAttribute("aria-label", t(`edit.${name}`));
+    element.title = t(`edit.${name}`);
+    Object.assign(element.style, {
+      left: `${rect.leftPct}%`,
+      top: `${rect.topPct}%`,
+      width: `${rect.widthPct}%`,
+      height: `${rect.heightPct}%`,
+      fontSize: `${Math.max(8, Number(rect.fontSize || 12) * scaleY)}px`,
+      lineHeight: `${Math.max(1, Number(rect.lineHeight || rect.height || 1) * scaleY)}px`,
+      textAlign: rect.align || "left",
+    });
+    if (document.activeElement !== element) {
+      element.textContent = texts[name] || "";
+    }
+  }
+}
+
+async function fetchBannerEditLayout(index) {
+  const key = previewCacheKey(index);
+  const cached = state.bannerLayoutCache.get(key);
+  if (cached) {
+    cached.used = performance.now();
+    return cached;
+  }
+  const existing = state.bannerLayoutRequests.get(key);
+  if (existing) {
+    return existing;
+  }
+  const request = api("/api/banner-layout", {
+    albumId: state.albumId,
+    index,
+    settings: state.settings,
+  })
+    .then((layout) => {
+      rememberBannerLayout(key, layout);
+      return layout;
+    })
+    .finally(() => {
+      state.bannerLayoutRequests.delete(key);
+    });
+  state.bannerLayoutRequests.set(key, request);
+  return request;
+}
+
+function rememberBannerLayout(key, layout) {
+  state.bannerLayoutCache.set(key, { ...layout, used: performance.now() });
+  while (state.bannerLayoutCache.size > state.bannerLayoutCacheLimit) {
+    let oldestKey = "";
+    let oldestUsed = Infinity;
+    for (const [entryKey, entry] of state.bannerLayoutCache) {
+      if (entry.used < oldestUsed) {
+        oldestKey = entryKey;
+        oldestUsed = entry.used;
+      }
+    }
+    if (!oldestKey) {
+      return;
+    }
+    state.bannerLayoutCache.delete(oldestKey);
+  }
+}
+
+function bannerEditFields() {
+  return [
+    $("brandEditField"),
+    $("modelEditField"),
+    $("lensEditField"),
+    $("paramsEditField"),
+  ].filter(Boolean);
+}
+
+function handleBannerEditFocus(event) {
+  const field = event.currentTarget;
+  field.textContent = field.dataset.currentValue || "";
+  field.dataset.editStartValue = field.dataset.currentValue || "";
+  selectEditableText(field);
+}
+
+function handleBannerEditInput(event) {
+  const field = event.currentTarget;
+  window.clearTimeout(state.bannerEditTimer);
+  state.bannerEditTimer = window.setTimeout(() => {
+    state.bannerEditTimer = 0;
+    const changed = commitBannerTextEdit(field.dataset.bannerField, field.textContent, {
+      refreshLayout: false,
+    });
+    if (changed) {
+      field.dataset.liveCommitted = "true";
+      field.dataset.currentValue = normalizeBannerEditValue(field.textContent);
+    }
+  }, 320);
+}
+
+function handleBannerEditBlur(event) {
+  const field = event.currentTarget;
+  window.clearTimeout(state.bannerEditTimer);
+  state.bannerEditTimer = 0;
+  if (field.dataset.skipCommit === "true") {
+    const restored = field.dataset.editStartValue || "";
+    delete field.dataset.skipCommit;
+    if (field.dataset.liveCommitted === "true") {
+      commitBannerTextEdit(field.dataset.bannerField, restored, {
+        forceRefresh: true,
+        refreshLayout: true,
+      });
+    }
+    delete field.dataset.liveCommitted;
+    delete field.dataset.editStartValue;
+    field.textContent = restored;
+    return;
+  }
+  commitBannerTextEdit(field.dataset.bannerField, field.textContent, {
+    forceRefresh: field.dataset.liveCommitted === "true",
+    refreshLayout: true,
+  });
+  delete field.dataset.liveCommitted;
+  delete field.dataset.editStartValue;
+}
+
+function handleBannerEditKeydown(event) {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    event.currentTarget.blur();
+  } else if (event.key === "Escape") {
+    event.preventDefault();
+    event.currentTarget.dataset.skipCommit = "true";
+    event.currentTarget.blur();
+  }
+}
+
+function pastePlainText(event) {
+  event.preventDefault();
+  const text = event.clipboardData?.getData("text/plain") || "";
+  document.execCommand("insertText", false, text.replace(/[\r\n]+/g, " "));
+}
+
+function selectEditableText(element) {
+  const selection = window.getSelection();
+  if (!selection) {
+    return;
+  }
+  const range = document.createRange();
+  range.selectNodeContents(element);
+  selection.removeAllRanges();
+  selection.addRange(range);
+}
+
+function commitBannerTextEdit(field, value, options = {}) {
+  const photo = state.photos[state.current];
+  if (!photo || !field) {
+    return false;
+  }
+  const normalized = normalizeBannerEditValue(value);
+  const defaultsForPhoto = defaultBannerTexts(photo);
+  const key = photoOverrideKey(photo);
+  const overrides = { ...(state.settings.bannerTextOverrides || {}) };
+  const photoOverrides = { ...(overrides[key] || {}) };
+  const previous = photoOverrides[field] || "";
+  if (!normalized || normalized === defaultsForPhoto[field]) {
+    delete photoOverrides[field];
+  } else {
+    photoOverrides[field] = normalized;
+  }
+  if (Object.keys(photoOverrides).length) {
+    overrides[key] = photoOverrides;
+  } else {
+    delete overrides[key];
+  }
+  const next = photoOverrides[field] || "";
+  const changed = previous !== next;
+  if (!changed && !options.forceRefresh) {
+    return false;
+  }
+  state.settings.bannerTextOverrides = overrides;
+  scheduleSaveState();
+  if (options.refreshLayout === false) {
+    clearPreviewImages();
+    scheduleServerPreview();
+  } else {
+    clearPreviewCache();
+    updatePreview();
+  }
+  return true;
+}
+
+function normalizeBannerEditValue(value) {
+  return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+function photoOverrideKey(photo) {
+  return photo?.path || `${photo?.name || ""}:${photo?.size || ""}`;
+}
+
+function bannerTexts(photo) {
+  const base = defaultBannerTexts(photo);
+  const overrides = state.settings.bannerTextOverrides?.[photoOverrideKey(photo)] || {};
+  return { ...base, ...overrides };
+}
+
+function defaultBannerTexts(photo) {
+  const exif = photo?.exif || {};
+  return {
+    brand: state.settings.brandText || inferBrand(exif),
+    model: exif.model || "Unknown camera",
+    lens: exif.lens || "Unknown lens",
+    params: formatParamsText(exif),
+  };
 }
 
 function updateMetaStrip(photo) {
@@ -1228,7 +1537,7 @@ function pumpPreviewWarmQueue() {
   }
 }
 
-function clearPreviewCache() {
+function clearPreviewImages() {
   window.clearTimeout(state.previewTimer);
   window.clearTimeout(state.preloadTimer);
   state.previewSerial += 1;
@@ -1241,6 +1550,13 @@ function clearPreviewCache() {
   }
   state.previewCache.clear();
   state.previewRequests.clear();
+}
+
+function clearPreviewCache() {
+  clearPreviewImages();
+  state.bannerLayoutSerial += 1;
+  state.bannerLayoutCache.clear();
+  state.bannerLayoutRequests.clear();
 }
 
 function updateLogoPreview(brand) {
@@ -1333,12 +1649,17 @@ function inferBrand(exif) {
 }
 
 function formatParams(exif) {
+  const text = formatParamsText(exif);
+  return escapeHtml(text).replace(/ {4}/g, "&nbsp;&nbsp;&nbsp;&nbsp;");
+}
+
+function formatParamsText(exif) {
   const values = [];
-  if (exif.focalLength) values.push(escapeHtml(exif.focalLength));
-  if (exif.fNumber) values.push(`F${escapeHtml(exif.fNumber)}`);
-  if (exif.exposureTime) values.push(`${escapeHtml(exif.exposureTime)}s`);
-  if (exif.iso) values.push(`ISO ${escapeHtml(exif.iso)}`);
-  return values.length ? values.join("&nbsp;&nbsp;&nbsp;&nbsp;") : t("exif.none");
+  if (exif.focalLength) values.push(exif.focalLength);
+  if (exif.fNumber) values.push(`F${exif.fNumber}`);
+  if (exif.exposureTime) values.push(`${exif.exposureTime}s`);
+  if (exif.iso) values.push(`ISO ${exif.iso}`);
+  return values.length ? values.join("    ") : t("exif.none");
 }
 
 function hexToRgba(hex, alpha) {

@@ -488,6 +488,67 @@ input[type="color"] {
   font-weight: 750;
 }
 
+.bannerEditLayer {
+  position: absolute;
+  z-index: 8;
+  pointer-events: none;
+}
+
+.bannerEditable {
+  position: absolute;
+  box-sizing: border-box;
+  min-width: 0;
+  overflow: hidden;
+  border: 0;
+  background: transparent;
+  color: transparent;
+  caret-color: #fff;
+  cursor: text;
+  font-family: "Segoe UI", Arial, sans-serif;
+  font-weight: 700;
+  outline: none;
+  padding: 0;
+  pointer-events: auto;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bannerBrandEditable {
+  font-size: var(--banner-brand-font, 20px);
+}
+
+.bannerModelEditable,
+.bannerLensEditable {
+  font-size: var(--banner-info-font, 12px);
+}
+
+.bannerParamsEditable {
+  font-size: var(--banner-param-font, 14px);
+}
+
+.bannerEditable:hover {
+  background: rgba(0, 0, 0, 0.18);
+  outline: 1px solid rgba(255, 255, 255, 0.45);
+}
+
+.bannerEditable:focus {
+  z-index: 2;
+  overflow: visible;
+  background: rgba(0, 0, 0, 0.72);
+  color: #fff;
+  outline: 1px solid rgba(255, 255, 255, 0.9);
+  text-overflow: clip;
+}
+
+.bannerModelEditable:focus,
+.bannerLensEditable:focus {
+  color: #e0e0e0;
+}
+
+.bannerParamsEditable {
+  text-align: right;
+}
+
 .metaStrip {
   display: flex;
   align-items: center;

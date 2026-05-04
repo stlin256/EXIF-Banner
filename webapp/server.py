@@ -105,6 +105,7 @@ DEFAULT_SETTINGS = {
     "brandFontPct": 5.556,
     "logoPath": "",
     "brandText": "",
+    "bannerTextOverrides": {},
     "shadow": True,
     "quality": 92,
     "exportFormat": "jpeg",
@@ -755,16 +756,38 @@ def parse_aspect_ratio(value: str, fallback: tuple[int, int]) -> tuple[int, int]
 
 def render_composite(photo: dict[str, Any], settings: dict[str, Any]) -> Image.Image:
     settings = merged_settings(settings)
+    with Image.open(photo["path"]) as source_image:
+        image = ImageOps.exif_transpose(source_image).convert("RGB")
+
+    layout = composite_layout(image.width, image.height, settings)
+    slide_width = layout["slideWidth"]
+    slide_height = layout["slideHeight"]
+    background = parse_color(settings.get("background", ""), (246, 244, 239))
+    canvas = Image.new("RGB", (slide_width, slide_height), background)
+
+    image = image.resize((layout["imageWidth"], layout["imageHeight"]), RESAMPLE)
+
+    if settings.get("shadow", True):
+        add_shadow(canvas, image, layout["imageLeft"], layout["imageTop"])
+    canvas.paste(image, (layout["imageLeft"], layout["imageTop"]))
+
+    draw_banner(
+        canvas,
+        photo,
+        settings,
+        layout["bannerLeft"],
+        layout["bannerTop"],
+        layout["bannerWidth"],
+        layout["bannerHeight"],
+    )
+    return canvas
+
+
+def composite_layout(image_width: int, image_height: int, settings: dict[str, Any]) -> dict[str, int]:
     fixed_size = bool(settings.get("_fixedSlideSize"))
     max_edge = EXPORT_MAX_EDGE if fixed_size else 8000
     slide_width = clamp_int(settings.get("slideWidth"), 1 if fixed_size else 800, max_edge, 1920)
     slide_height = clamp_int(settings.get("slideHeight"), 1 if fixed_size else 600, max_edge, 1080)
-    background = parse_color(settings.get("background", ""), (246, 244, 239))
-    canvas = Image.new("RGB", (slide_width, slide_height), background)
-
-    with Image.open(photo["path"]) as source_image:
-        image = ImageOps.exif_transpose(source_image).convert("RGB")
-
     banner_height = max(24, int(slide_height * float(settings["bannerHeightPct"]) / 100))
     gap = max(0, int(slide_height * float(settings["gapPct"]) / 100))
     margin_x = max(0, int(slide_width * float(settings.get("pageMarginXPct", 2.5)) / 100))
@@ -772,26 +795,52 @@ def render_composite(photo: dict[str, Any], settings: dict[str, Any]) -> Image.I
     max_width = max(1, slide_width - margin_x * 2)
     max_group_height = max(1, slide_height - margin_y * 2)
     max_image_height = max(1, max_group_height - banner_height - gap)
-    scale = min(max_width / image.width, max_image_height / image.height)
+    scale = min(max_width / image_width, max_image_height / image_height)
     image_scale_cap = settings.get("_imageScaleCap")
     if image_scale_cap:
         scale = min(scale, max(0.01, float(image_scale_cap)))
-    image_size = (max(1, round(image.width * scale)), max(1, round(image.height * scale)))
-    image = image.resize(image_size, RESAMPLE)
+    fitted_image_width = max(1, round(image_width * scale))
+    fitted_image_height = max(1, round(image_height * scale))
 
-    total_height = image.height + gap + banner_height
-    image_left = (slide_width - image.width) // 2
+    total_height = fitted_image_height + gap + banner_height
+    image_left = (slide_width - fitted_image_width) // 2
     image_top = (slide_height - total_height) // 2
-
-    if settings.get("shadow", True):
-        add_shadow(canvas, image, image_left, image_top)
-    canvas.paste(image, (image_left, image_top))
 
     banner_width = max(120, int(slide_width * float(settings["bannerWidthPct"]) / 100))
     banner_left = (slide_width - banner_width) // 2
-    banner_top = image_top + image.height + gap
-    draw_banner(canvas, photo["exif"], settings, banner_left, banner_top, banner_width, banner_height)
-    return canvas
+    banner_top = image_top + fitted_image_height + gap
+    return {
+        "slideWidth": slide_width,
+        "slideHeight": slide_height,
+        "imageLeft": image_left,
+        "imageTop": image_top,
+        "imageWidth": fitted_image_width,
+        "imageHeight": fitted_image_height,
+        "bannerLeft": banner_left,
+        "bannerTop": banner_top,
+        "bannerWidth": banner_width,
+        "bannerHeight": banner_height,
+    }
+
+
+def banner_edit_layout(photo: dict[str, Any], settings: dict[str, Any]) -> dict[str, Any]:
+    settings = merged_settings(settings)
+    image_width, image_height = oriented_image_size(photo)
+    layout = composite_layout(image_width, image_height, settings)
+    fields = banner_edit_fields(photo, settings, layout)
+    return {
+        "slideWidth": layout["slideWidth"],
+        "slideHeight": layout["slideHeight"],
+        "banner": rect_payload(
+            layout["bannerLeft"],
+            layout["bannerTop"],
+            layout["bannerWidth"],
+            layout["bannerHeight"],
+            layout["slideWidth"],
+            layout["slideHeight"],
+        ),
+        "fields": fields,
+    }
 
 
 def export_settings_for_photo(photo: dict[str, Any], settings: dict[str, Any]) -> dict[str, Any]:
@@ -894,13 +943,17 @@ def add_shadow(canvas: Image.Image, image: Image.Image, left: int, top: int) -> 
 
 def draw_banner(
     canvas: Image.Image,
-    exif: dict[str, str],
+    photo: dict[str, Any],
     settings: dict[str, Any],
     left: int,
     top: int,
     width: int,
     height: int,
 ) -> None:
+    exif = photo.get("exif", {})
+    if not isinstance(exif, dict):
+        exif = {}
+    text_overrides = banner_text_overrides(photo, settings)
     overlay = Image.new("RGBA", canvas.size, (0, 0, 0, 0))
     overlay_draw = ImageDraw.Draw(overlay)
     color = parse_color(settings.get("bannerColor", ""), (0, 0, 0))
@@ -919,7 +972,17 @@ def draw_banner(
     logo_box_width = max(1, round(width * 0.22))
     content_right = left + width - horizontal_margin - text_margin
 
-    logo_width = draw_logo_or_brand(canvas, draw, exif, settings, logo_left, logo_top, logo_box_width, logo_height)
+    logo_width = draw_logo_or_brand(
+        canvas,
+        draw,
+        exif,
+        settings,
+        logo_left,
+        logo_top,
+        logo_box_width,
+        logo_height,
+        clean_text(text_overrides.get("brand")),
+    )
     content_left = logo_left + logo_width + logo_gap + text_margin
 
     info_font_size = max(10, int(canvas.height * float(settings["infoFontPct"]) / 100))
@@ -927,8 +990,8 @@ def draw_banner(
     info_font = load_font(info_font_size, bold=True)
     param_font = load_font(param_font_size, bold=True)
 
-    model = exif.get("model") or "Unknown camera"
-    lens = exif.get("lens") or "Unknown lens"
+    model = clean_text(text_overrides.get("model")) or exif.get("model") or "Unknown camera"
+    lens = clean_text(text_overrides.get("lens")) or exif.get("lens") or "Unknown lens"
     info_width = max(80, round(width * 0.5) - text_margin * 2)
     info_lines = [
         ellipsize(draw, model, info_font, info_width),
@@ -944,7 +1007,7 @@ def draw_banner(
             fill=(224, 224, 224),
         )
 
-    params = format_params(exif)
+    params = clean_text(text_overrides.get("params")) or format_params(exif)
     param_left = left + int(width * 0.5)
     param_width = max(80, content_right - param_left)
     param_font = fit_font(params, param_font, param_width, int(height * 0.72))
@@ -953,6 +1016,207 @@ def draw_banner(
     param_x = content_right - (bbox[2] - bbox[0])
     param_y = top + (height - font_line_height(param_font)) / 2
     draw.text((param_x, param_y), params, font=param_font, fill=(255, 255, 255))
+
+
+def banner_edit_fields(
+    photo: dict[str, Any],
+    settings: dict[str, Any],
+    layout: dict[str, int],
+) -> dict[str, dict[str, Any]]:
+    exif = photo.get("exif", {})
+    if not isinstance(exif, dict):
+        exif = {}
+    text_overrides = banner_text_overrides(photo, settings)
+    left = layout["bannerLeft"]
+    top = layout["bannerTop"]
+    width = layout["bannerWidth"]
+    height = layout["bannerHeight"]
+    slide_width = layout["slideWidth"]
+    slide_height = layout["slideHeight"]
+
+    measure_draw = ImageDraw.Draw(Image.new("RGB", (1, 1)))
+    macro_unit = width / 600
+    horizontal_margin = max(1, round(15 * macro_unit))
+    logo_gap = max(1, round(10 * macro_unit))
+    text_margin = max(0, round(7.2 * macro_unit))
+    logo_left = left + horizontal_margin
+    logo_height = max(1, round(height * 0.75))
+    logo_top = top + (height - logo_height) // 2
+    logo_box_width = max(1, round(width * 0.22))
+    content_right = left + width - horizontal_margin - text_margin
+
+    logo_width, has_logo, brand_font_size, brand_line_height = logo_or_brand_metrics(
+        measure_draw,
+        exif,
+        settings,
+        layout,
+        logo_box_width,
+        logo_height,
+        clean_text(text_overrides.get("brand")),
+    )
+    content_left = logo_left + logo_width + logo_gap + text_margin
+
+    info_font_size = max(10, int(slide_height * float(settings["infoFontPct"]) / 100))
+    param_font_size = max(12, int(slide_height * float(settings["paramFontPct"]) / 100))
+    info_font = load_font(info_font_size, bold=True)
+    param_font = load_font(param_font_size, bold=True)
+    info_line_height = font_line_height(info_font)
+    info_y = top + (height - info_line_height * 2) / 2
+
+    info_width = max(80, round(width * 0.5) - text_margin * 2)
+    param_left = left + int(width * 0.5)
+    param_width = max(80, content_right - param_left)
+    visual_info_width = max(1, min(info_width, param_left - content_left - text_margin))
+
+    params = clean_text(text_overrides.get("params")) or format_params(exif)
+    param_font = fit_font(params, param_font, param_width, int(height * 0.72))
+    param_line_height = font_line_height(param_font)
+    param_y = top + (height - param_line_height) / 2
+
+    fields: dict[str, dict[str, Any]] = {
+        "brand": rect_payload(
+            logo_left,
+            logo_top,
+            max(1, logo_width),
+            logo_height,
+            slide_width,
+            slide_height,
+            hidden=has_logo,
+            font_size=brand_font_size,
+            line_height=brand_line_height,
+            align="left",
+        ),
+        "model": rect_payload(
+            content_left,
+            info_y,
+            visual_info_width,
+            info_line_height,
+            slide_width,
+            slide_height,
+            font_size=info_font_size,
+            line_height=info_line_height,
+            align="left",
+        ),
+        "lens": rect_payload(
+            content_left,
+            info_y + info_line_height,
+            visual_info_width,
+            info_line_height,
+            slide_width,
+            slide_height,
+            font_size=info_font_size,
+            line_height=info_line_height,
+            align="left",
+        ),
+        "params": rect_payload(
+            param_left,
+            param_y,
+            param_width,
+            param_line_height,
+            slide_width,
+            slide_height,
+            font_size=getattr(param_font, "size", param_font_size),
+            line_height=param_line_height,
+            align="right",
+        ),
+    }
+    return fields
+
+
+def logo_or_brand_metrics(
+    draw: ImageDraw.ImageDraw,
+    exif: dict[str, str],
+    settings: dict[str, Any],
+    layout: dict[str, int],
+    width: int,
+    height: int,
+    brand_override: str = "",
+) -> tuple[int, bool, int, int]:
+    logo_path = render_logo_path(exif, settings)
+    logo = load_logo_image(str(logo_path) if logo_path else "")
+    if logo:
+        try:
+            scale = min(width / logo.width, height / logo.height)
+            return max(1, int(logo.width * scale)), True, 0, height
+        except Exception:
+            pass
+
+    brand = brand_override or clean_text(settings.get("brandText")) or infer_brand(exif)
+    font_size = max(12, int(layout["slideHeight"] * float(settings["brandFontPct"]) / 100))
+    font = fit_font(brand, load_font(font_size, bold=True), width, height)
+    brand = ellipsize(draw, brand, font, width)
+    bbox = draw.textbbox((0, 0), brand, font=font)
+    return max(1, bbox[2] - bbox[0]), False, getattr(font, "size", font_size), font_line_height(font)
+
+
+def rect_payload(
+    left: float,
+    top: float,
+    width: float,
+    height: float,
+    slide_width: int,
+    slide_height: int,
+    *,
+    hidden: bool = False,
+    font_size: int | float | None = None,
+    line_height: int | float | None = None,
+    align: str = "left",
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "left": left,
+        "top": top,
+        "width": width,
+        "height": height,
+        "leftPct": left / slide_width * 100,
+        "topPct": top / slide_height * 100,
+        "widthPct": width / slide_width * 100,
+        "heightPct": height / slide_height * 100,
+        "hidden": hidden,
+        "align": align,
+    }
+    if font_size is not None:
+        payload["fontSize"] = font_size
+    if line_height is not None:
+        payload["lineHeight"] = line_height
+    return payload
+
+
+def banner_text_overrides(photo: dict[str, Any], settings: dict[str, Any]) -> dict[str, str]:
+    overrides = settings.get("bannerTextOverrides")
+    if not isinstance(overrides, dict):
+        return {}
+    name = clean_text(photo.get("name"))
+    size = clean_text(photo.get("size"))
+    keys = [
+        photo_override_key(photo),
+        f"{name}:{size}" if name or size else "",
+        name,
+    ]
+    path_text = clean_text(photo.get("path"))
+    if path_text:
+        file_name = Path(path_text).name
+        keys.extend([
+            f"{file_name}:{size}" if file_name or size else "",
+            file_name,
+        ])
+    for key in keys:
+        if not key:
+            continue
+        values = overrides.get(key)
+        if isinstance(values, dict):
+            return {
+                field: clean_text(values.get(field))
+                for field in ("brand", "model", "lens", "params")
+                if clean_text(values.get(field))
+            }
+    return {}
+
+
+def photo_override_key(photo: dict[str, Any]) -> str:
+    path_text = clean_text(photo.get("path"))
+    if path_text:
+        return path_text
+    return f"{clean_text(photo.get('name'))}:{clean_text(photo.get('size'))}"
 
 
 def draw_logo_or_brand(
@@ -964,6 +1228,7 @@ def draw_logo_or_brand(
     top: int,
     width: int,
     height: int,
+    brand_override: str = "",
 ) -> int:
     logo_path = render_logo_path(exif, settings)
     logo = load_logo_image(str(logo_path) if logo_path else "")
@@ -977,7 +1242,7 @@ def draw_logo_or_brand(
         except Exception:
             pass
 
-    brand = clean_text(settings.get("brandText")) or infer_brand(exif)
+    brand = brand_override or clean_text(settings.get("brandText")) or infer_brand(exif)
     font_size = max(12, int(canvas.height * float(settings["brandFontPct"]) / 100))
     font = fit_font(brand, load_font(font_size, bold=True), width, height)
     brand = ellipsize(draw, brand, font, width)
@@ -1907,6 +2172,8 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.send_json(start_export_job(payload))
             if parsed.path == "/api/export/status":
                 return self.send_json(get_export_job(clean_text(payload.get("jobId"))))
+            if parsed.path == "/api/banner-layout":
+                return self.send_json(self.banner_layout(payload))
             if parsed.path == "/api/preview":
                 return self.send_preview(payload)
             if parsed.path == "/api/export/images":
@@ -1931,6 +2198,15 @@ class Handler(SimpleHTTPRequestHandler):
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()
         self.wfile.write(data)
+
+    def banner_layout(self, payload: dict[str, Any]) -> dict[str, Any]:
+        album_id = clean_text(payload.get("albumId"))
+        album = get_album(album_id)
+        index = int(payload.get("index", 0))
+        photos = album["photos"]
+        if index < 0 or index >= len(photos):
+            raise ValueError("Banner layout photo index is out of range.")
+        return banner_edit_layout(photos[index], payload.get("settings"))
 
     def send_preview(self, payload: dict[str, Any]) -> None:
         album_id = clean_text(payload.get("albumId"))
