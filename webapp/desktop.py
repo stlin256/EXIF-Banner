@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import ctypes
 import locale
 import os
 from http.server import ThreadingHTTPServer
@@ -44,6 +45,18 @@ LOCALIZATIONS = {
         "global.cancel": "取消",
     },
 }
+
+MESSAGE_ICON_FLAGS = {
+    "error": 0x10,
+    "warning": 0x30,
+    "info": 0x40,
+}
+
+
+class NativeDialogs:
+    def show_message(self, kind: str, title: str, message: str) -> bool:
+        show_native_message(kind, title, message)
+        return True
 
 
 def parse_args() -> argparse.Namespace:
@@ -123,10 +136,41 @@ def desktop_localization(language: str) -> dict[str, str]:
     return LOCALIZATIONS[desktop_language(language)]
 
 
+def show_native_message(kind: str, title: str, message: str) -> None:
+    title_text = clean_dialog_text(title) or APP_TITLE
+    message_text = clean_dialog_text(message)
+    if os.name == "nt":
+        flags = MESSAGE_ICON_FLAGS.get(kind, MESSAGE_ICON_FLAGS["info"]) | 0x10000 | 0x40000
+        ctypes.windll.user32.MessageBoxW(None, message_text, title_text, flags)
+        return
+
+    try:
+        import tkinter as tk
+        from tkinter import messagebox
+
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes("-topmost", True)
+        if kind == "error":
+            messagebox.showerror(title_text, message_text, parent=root)
+        elif kind == "warning":
+            messagebox.showwarning(title_text, message_text, parent=root)
+        else:
+            messagebox.showinfo(title_text, message_text, parent=root)
+        root.destroy()
+    except Exception:
+        print(f"{title_text}\n{message_text}")
+
+
+def clean_dialog_text(value: Any) -> str:
+    return str(value or "").replace("\r\n", "\n").strip()
+
+
 def start_webview(url: str, debug: bool, language: str) -> None:
     webview.create_window(
         APP_TITLE,
         url,
+        js_api=NativeDialogs(),
         width=DEFAULT_WIDTH,
         height=DEFAULT_HEIGHT,
         min_size=(MIN_WIDTH, MIN_HEIGHT),

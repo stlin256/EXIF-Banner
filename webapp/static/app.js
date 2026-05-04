@@ -1,4 +1,5 @@
 const STORAGE_KEY = "pptExifBannerSettings.v3";
+const APP_NAME = "EXIF-Banner";
 
 const state = {
   albumId: "",
@@ -1905,7 +1906,7 @@ async function exportAlbum(kind) {
   }
   const selection = [...state.selected].sort((a, b) => a - b);
   if (!selection.length) {
-    alert(t("alert.selectPhotos"));
+    showWarning(t("alert.selectPhotos"));
     return;
   }
 
@@ -1998,14 +1999,56 @@ function applyStatusMessage() {
 
 function showError(error) {
   setIdle("status.error");
-  alert(error.message || String(error));
+  const message = error.message || String(error);
+  showNativeMessage("error", t("status.error"), message)
+    .then((shown) => {
+      if (!shown) {
+        alert(message);
+      }
+    });
 }
 
 function showExportCompleteDialog(kind, result) {
+  if (hasNativeDialogApi()) {
+    const { title, message } = exportCompleteMessage(kind, result);
+    showNativeMessage("info", title, message).then((shown) => {
+      if (!shown) {
+        showExportCompleteOverlay(kind, result);
+      }
+    });
+    return;
+  }
+  showExportCompleteOverlay(kind, result);
+}
+
+function showWarning(message) {
+  showNativeMessage("warning", APP_NAME, message)
+    .then((shown) => {
+      if (!shown) {
+        alert(message);
+      }
+    });
+}
+
+function showExportCompleteOverlay(kind, result) {
   state.exportDialog = { kind, result };
   renderExportCompleteDialog();
   $("exportCompleteDialog").hidden = false;
   $("exportCompleteCloseBtn").focus();
+}
+
+function exportCompleteMessage(kind, result) {
+  const isImages = kind === "images";
+  const count = Number(result.count || 0);
+  const targetPath = isImages ? result.outputDir || "" : result.outputFile || "";
+  const title = isImages ? t("dialog.imagesComplete") : t("dialog.pptxComplete");
+  const summary = isImages
+    ? t("status.exportedImages", { count })
+    : t("status.exportedPptx", { count });
+  const message = targetPath
+    ? `${summary}\n\n${t("dialog.saveLocation")}:\n${targetPath}`
+    : summary;
+  return { title, message, targetPath, summary };
 }
 
 function renderExportCompleteDialog() {
@@ -2013,13 +2056,9 @@ function renderExportCompleteDialog() {
     return;
   }
   const { kind, result } = state.exportDialog;
-  const isImages = kind === "images";
-  const count = Number(result.count || 0);
-  const targetPath = isImages ? result.outputDir || "" : result.outputFile || "";
-  $("exportCompleteTitle").textContent = isImages ? t("dialog.imagesComplete") : t("dialog.pptxComplete");
-  $("exportCompleteSummary").textContent = isImages
-    ? t("status.exportedImages", { count })
-    : t("status.exportedPptx", { count });
+  const { title, summary, targetPath } = exportCompleteMessage(kind, result);
+  $("exportCompleteTitle").textContent = title;
+  $("exportCompleteSummary").textContent = summary;
   $("exportCompletePath").textContent = targetPath;
   $("exportCompletePath").title = targetPath;
 }
@@ -2027,6 +2066,23 @@ function renderExportCompleteDialog() {
 function hideExportCompleteDialog() {
   $("exportCompleteDialog").hidden = true;
   state.exportDialog = null;
+}
+
+function hasNativeDialogApi() {
+  return !!window.pywebview?.api?.show_message;
+}
+
+async function showNativeMessage(kind, title, message) {
+  if (!hasNativeDialogApi()) {
+    return false;
+  }
+  try {
+    await window.pywebview.api.show_message(kind, title, message);
+    return true;
+  } catch (error) {
+    console.error(error);
+    return false;
+  }
 }
 
 function nextFrame() {
