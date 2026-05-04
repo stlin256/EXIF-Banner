@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import argparse
+import os
 from http.server import ThreadingHTTPServer
+from pathlib import Path
 from threading import Thread
 from typing import Any
 
@@ -21,6 +23,7 @@ except ModuleNotFoundError:
 
 APP_TITLE = "EXIF-Banner"
 DEFAULT_HOST = "127.0.0.1"
+DEFAULT_PORT = 8765
 DEFAULT_WIDTH = 1360
 DEFAULT_HEIGHT = 860
 MIN_WIDTH = 1024
@@ -33,7 +36,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--port",
         type=int,
-        default=0,
+        default=DEFAULT_PORT,
         help="Local HTTP port. Use 0 to let the OS choose an available port.",
     )
     parser.add_argument("--debug", action="store_true", help="Enable pywebview debug tools.")
@@ -55,6 +58,26 @@ def shutdown_server(server: ThreadingHTTPServer, thread: Thread) -> None:
     thread.join(timeout=3)
 
 
+def webview_storage_path() -> str | None:
+    candidates: list[Path] = []
+    if os.name == "nt":
+        base = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA")
+        if base:
+            candidates.append(Path(base) / "EXIF-Banner" / "WebView")
+        candidates.append(Path.home() / "AppData" / "Local" / "EXIF-Banner" / "WebView")
+    else:
+        candidates.append(Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share")) / "EXIF-Banner" / "WebView")
+    candidates.append(Path.home() / ".exif-banner" / "webview")
+
+    for path in candidates:
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+            return str(path)
+        except OSError:
+            continue
+    return None
+
+
 def start_webview(url: str, debug: bool) -> None:
     webview.create_window(
         APP_TITLE,
@@ -64,9 +87,13 @@ def start_webview(url: str, debug: bool) -> None:
         min_size=(MIN_WIDTH, MIN_HEIGHT),
     )
     start_kwargs: dict[str, Any] = {"debug": debug, "private_mode": False}
+    storage_path = webview_storage_path()
+    if storage_path:
+        start_kwargs["storage_path"] = storage_path
     try:
         webview.start(**start_kwargs)
     except TypeError:
+        start_kwargs.pop("storage_path", None)
         start_kwargs.pop("private_mode", None)
         webview.start(**start_kwargs)
 
