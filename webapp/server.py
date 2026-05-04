@@ -2177,7 +2177,7 @@ def theme_xml() -> str:
 
 
 class Handler(SimpleHTTPRequestHandler):
-    server_version = "PPTExifBanner/0.1"
+    server_version = "EXIFBanner/0.1"
 
     def do_GET(self) -> None:
         parsed = urlparse(self.path)

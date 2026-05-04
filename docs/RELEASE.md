@@ -1,6 +1,6 @@
 # 发布说明
 
-EXIF-Banner 的 Windows 版本以 x64 可执行文件发布。发布资产是一个单文件 `.exe`，不再压缩成 zip。
+EXIF-Banner 的 Windows 版本以 x64 可执行文件发布。发布资产是一个单文件 `.exe`，不再压缩成 zip。默认发布形态是基于 pywebview 的桌面 App，界面仍复用本地 Web UI，但不再需要用户手动打开浏览器。
 
 所有本地发布产物统一放在仓库根目录的 `release/` 文件夹中，并按版本号分目录保存。`release/` 只存放本地构建产物，不提交到 Git。
 
@@ -70,12 +70,12 @@ v0.1.0
 EXIF-Banner-v0.1.0-windows-amd64.exe
 ```
 
-用户下载后双击 `EXIF-Banner-v0.1.0-windows-amd64.exe`，程序会启动本地 Web 服务并打开浏览器界面。
+用户下载后双击 `EXIF-Banner-v0.1.0-windows-amd64.exe`，程序会启动本地 Web 服务并打开桌面窗口。Windows 版本依赖系统 WebView2 Runtime；Windows 11 通常已内置，Windows 10 如缺失需安装 Microsoft Edge WebView2 Runtime。
 
 当前验证结果：
 
 ```text
-EXIF-Banner-v0.1.0-windows-amd64.exe     约 23.47 MB
+EXIF-Banner-v0.1.0-windows-amd64.exe     约 25.95 MB
 ```
 
 ## 构建环境
@@ -87,6 +87,7 @@ Python 3.13.5
 PyInstaller 6.20.0
 Pillow 12.2.0
 python-pptx 1.0.2
+pywebview 6.2.1
 ```
 
 创建独立构建环境：
@@ -111,10 +112,12 @@ $env:TMP = $env:TEMP
 
 ```powershell
 $root = (Resolve-Path .).Path
+$env:PYTHONNOUSERSITE = "1"
 
-.\.venv-release\Scripts\pyinstaller.exe `
+.\.venv-release\Scripts\python.exe -m PyInstaller `
   --noconfirm `
   --onefile `
+  --windowed `
   --name EXIF-Banner `
   --paths "$root\webapp" `
   --add-data "$root\webapp\static;static" `
@@ -139,7 +142,7 @@ $root = (Resolve-Path .).Path
   --distpath "$root\package\release-dist" `
   --workpath "$root\package\release-build" `
   --specpath "$root\package\release-spec" `
-  "$root\webapp\server.py"
+  "$root\webapp\desktop.py"
 ```
 
 生成文件位于：
@@ -177,20 +180,20 @@ release/v0.1.0/GITHUB_RELEASE.md
 
 上传 Release 前必须验证：
 
-1. `EXIF-Banner.exe` 可以启动本地服务。
-2. 浏览器可以打开 `http://127.0.0.1:8765/`。
+1. `EXIF-Banner.exe` 可以启动桌面窗口。
+2. 桌面窗口内页面加载正常。
 3. 可以选择并扫描本地相册。
 4. 预览渲染正常。
 5. JPEG 导出正常。
 6. PPTX 导出正常，并且导出的 PPTX 可以打开。
 
-也可以用测试端口运行：
+浏览器模式仍可用于开发和排查问题：
 
 ```powershell
-release\v0.1.0\EXIF-Banner-v0.1.0-windows-amd64.exe --host 127.0.0.1 --port 8876 --no-browser
+python webapp\server.py --host 127.0.0.1 --port 8876
 ```
 
-再通过页面或本地 API 验证扫描、预览、图片导出和 PPTX 导出。
+再通过浏览器页面或本地 API 验证扫描、预览、图片导出和 PPTX 导出。
 
 ## 发布流程
 
