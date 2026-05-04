@@ -35,15 +35,19 @@ const state = {
   bannerUndoStack: [],
   bannerUndoLimit: 80,
   photoItems: new Map(),
+  thumbObserver: null,
   activePhotoItem: null,
   saveTimer: 0,
   scrollFrame: 0,
   preloadTimer: 0,
+  warmIdleTimer: 0,
   wheelDelta: 0,
   wheelStepTimer: 0,
   wheelIdleTimer: 0,
   wheelDirection: 0,
   lastMoveDirection: 1,
+  lastNavigationAt: 0,
+  lastSettingsChangeAt: 0,
   language: "zh",
   sortMode: "dateAsc",
   statusMessage: { key: "status.waitingScan", args: {} },
@@ -285,6 +289,7 @@ function init() {
 
   for (const input of settingsInputs()) {
     const onSettingChange = () => {
+      markPreviewSettingsChanged();
       readSettings();
       updatePreview();
     };
@@ -678,6 +683,8 @@ function renderPhotoList() {
   list.textContent = "";
   state.photoItems = new Map();
   state.activePhotoItem = null;
+  resetThumbObserver();
+  state.thumbObserver = createThumbObserver(list);
   const fragment = document.createDocumentFragment();
   for (const photo of state.photos) {
     const item = document.createElement("div");
@@ -703,8 +710,11 @@ function renderPhotoList() {
     const image = document.createElement("img");
     image.className = "photoThumb";
     image.loading = "lazy";
-    image.src = `/api/photo?album=${encodeURIComponent(state.albumId)}&index=${photo.index}&max=180`;
+    image.decoding = "async";
+    image.alt = "";
+    image.dataset.src = thumbUrl(photo.index);
     image.addEventListener("click", () => selectPhoto(photo.index));
+    queueThumbImage(image);
 
     const text = document.createElement("div");
     text.className = "photoText";
@@ -724,11 +734,63 @@ function renderPhotoList() {
   list.append(fragment);
 }
 
+function thumbUrl(index) {
+  return `/api/photo?album=${encodeURIComponent(state.albumId)}&index=${index}&max=180`;
+}
+
+function createThumbObserver(root) {
+  if (!("IntersectionObserver" in window)) {
+    return null;
+  }
+  return new IntersectionObserver(
+    (entries, observer) => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) {
+          continue;
+        }
+        observer.unobserve(entry.target);
+        loadThumbImage(entry.target);
+      }
+    },
+    {
+      root,
+      rootMargin: "600px 0px",
+      threshold: 0.01,
+    }
+  );
+}
+
+function queueThumbImage(image) {
+  if (state.thumbObserver) {
+    state.thumbObserver.observe(image);
+  } else {
+    loadThumbImage(image);
+  }
+}
+
+function loadThumbImage(image) {
+  const src = image.dataset.src;
+  if (src && image.src !== src) {
+    image.src = src;
+  }
+  delete image.dataset.src;
+}
+
+function resetThumbObserver() {
+  if (state.thumbObserver) {
+    state.thumbObserver.disconnect();
+    state.thumbObserver = null;
+  }
+}
+
 function selectPhoto(index) {
   if (!state.photos.length) {
     return;
   }
   const nextIndex = Math.max(0, Math.min(index, state.photos.length - 1));
+  if (nextIndex !== state.current) {
+    state.lastNavigationAt = performance.now();
+  }
   state.current = nextIndex;
   updateActivePhotoItem(nextIndex);
   $("slideCanvas").hidden = false;
@@ -1588,6 +1650,15 @@ function scheduleServerPreview() {
   schedulePreviewWarmup(index, 140);
 }
 
+function markPreviewSettingsChanged() {
+  state.lastSettingsChangeAt = performance.now();
+  state.previewWarmGeneration += 1;
+  state.previewWarmQueue = [];
+  state.previewWarmQueued.clear();
+  window.clearTimeout(state.preloadTimer);
+  window.clearTimeout(state.warmIdleTimer);
+}
+
 async function renderServerPreview(index = state.current, serial = ++state.previewSerial) {
   if (!state.albumId || !state.photos[index]) {
     return;
@@ -1694,9 +1765,12 @@ function rememberPreview(key, url) {
   }
 }
 
-function schedulePreviewWarmup(index, delay = 40) {
+function schedulePreviewWarmup(index, delay = 40, options = {}) {
   window.clearTimeout(state.preloadTimer);
   const generation = ++state.previewWarmGeneration;
+  const compact = !options.full && shouldUseCompactWarmup();
+  const radius = compact ? 6 : state.previewWarmRadius;
+  const effectiveDelay = compact ? Math.max(delay, 220) : delay;
   state.previewWarmQueue = [];
   state.previewWarmQueued.clear();
   state.previewWarmActive.clear();
@@ -1704,7 +1778,7 @@ function schedulePreviewWarmup(index, delay = 40) {
     if (generation !== state.previewWarmGeneration) {
       return;
     }
-    for (const nextIndex of previewWarmOrder(index)) {
+    for (const nextIndex of previewWarmOrder(index, radius)) {
       const key = previewCacheKey(nextIndex);
       if (!state.previewCache.has(key) && !state.previewRequests.has(key) && !state.previewWarmQueued.has(key)) {
         state.previewWarmQueue.push({ index: nextIndex, key, generation });
@@ -1712,20 +1786,38 @@ function schedulePreviewWarmup(index, delay = 40) {
       }
     }
     pumpPreviewWarmQueue();
-  }, delay);
+    scheduleFullWarmupAfterIdle(index, generation, compact);
+  }, effectiveDelay);
 }
 
-function previewWarmOrder(index) {
+function shouldUseCompactWarmup() {
+  const now = performance.now();
+  return now - state.lastNavigationAt < 500 || now - state.lastSettingsChangeAt < 700;
+}
+
+function scheduleFullWarmupAfterIdle(index, generation, compact) {
+  window.clearTimeout(state.warmIdleTimer);
+  if (!compact) {
+    return;
+  }
+  state.warmIdleTimer = window.setTimeout(() => {
+    if (generation === state.previewWarmGeneration && index === state.current) {
+      schedulePreviewWarmup(index, 0, { full: true });
+    }
+  }, 900);
+}
+
+function previewWarmOrder(index, radius = state.previewWarmRadius) {
   const order = [];
   const primary = state.lastMoveDirection >= 0 ? 1 : -1;
   const secondary = -primary;
-  for (let distance = 1; distance <= state.previewWarmRadius; distance += 1) {
+  for (let distance = 1; distance <= radius; distance += 1) {
     const nextIndex = index + primary * distance;
     if (nextIndex >= 0 && nextIndex < state.photos.length) {
       order.push(nextIndex);
     }
   }
-  for (let distance = 1; distance <= Math.ceil(state.previewWarmRadius / 2); distance += 1) {
+  for (let distance = 1; distance <= Math.ceil(radius / 2); distance += 1) {
     const nextIndex = index + secondary * distance;
     if (nextIndex >= 0 && nextIndex < state.photos.length) {
       order.push(nextIndex);
@@ -1760,6 +1852,7 @@ function pumpPreviewWarmQueue() {
 function clearPreviewImages() {
   window.clearTimeout(state.previewTimer);
   window.clearTimeout(state.preloadTimer);
+  window.clearTimeout(state.warmIdleTimer);
   state.previewSerial += 1;
   state.previewWarmGeneration += 1;
   state.previewWarmQueue = [];
