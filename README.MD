@@ -4,9 +4,9 @@
 
 [English](README_EN.MD)
 
-EXIF-Banner 是一个本地运行的照片参数横幅生成工具。它用浏览器作为交互界面，扫描本地相册，读取照片 EXIF 信息，并批量导出带拍摄参数横幅的图片或 PPTX。
+EXIF-Banner 是一个本地运行的照片参数横幅生成工具。它以桌面 App 形式打开本地 Web 界面，扫描本地相册，读取照片 EXIF 信息，并批量导出带拍摄参数横幅的图片或 PPTX。
 
-这个项目从早期的 [PPT-EXIF-Banner](https://github.com/stlin256/PPT-EXIF-Banner) PowerPoint 宏脚本发展而来。旧方案需要手动准备 ExifTool、手动运行 EXIF 导出，再在 Office 宏里指定图片、CSV、Logo 等路径；EXIF-Banner 把这些步骤整合为本地 Web 应用，减少宏安全设置、路径配置和批量操作上的不便。
+这个项目从早期的 [PPT-EXIF-Banner](https://github.com/stlin256/PPT-EXIF-Banner) PowerPoint 宏脚本发展而来。旧方案需要手动准备 ExifTool、手动运行 EXIF 导出，再在 Office 宏里指定图片、CSV、Logo 等路径；EXIF-Banner 把这些步骤整合为本地桌面应用，减少宏安全设置、路径配置和批量操作上的不便。
 
 作者：[@stlin256](https://github.com/stlin256/EXIF-Banner)
 
@@ -16,7 +16,7 @@ Windows 用户可以直接下载单文件 EXE：
 
 [前往 GitHub Releases](https://github.com/stlin256/EXIF-Banner/releases)
 
-下载后双击运行即可。程序会在本机启动 Web 服务并打开浏览器界面；照片扫描、横幅渲染和导出都在本地完成。
+下载后双击运行即可。程序会在本机启动服务并打开桌面窗口；照片扫描、横幅渲染和导出都在本地完成。Windows 版本使用系统 WebView2 Runtime，Windows 11 通常已经内置。
 
 ## 示例
 
@@ -33,11 +33,13 @@ Windows 用户可以直接下载单文件 EXE：
 ## 特性
 
 - 本地运行，不上传照片或 EXIF 数据。
-- 浏览器交互，支持选择相册、手动选择 Logo、实时预览横幅。
+- 桌面 App 交互，不需要手动打开浏览器；也保留浏览器模式用于开发和排查问题。
+- 支持选择相册、手动选择 Logo、实时预览横幅。
 - 原生读取常见 EXIF 信息，并在可用时使用 ExifTool 补充更完整的数据。
 - 支持相机型号、镜头型号、焦距、光圈、快门、ISO 等参数展示。
 - 支持按相机品牌自动匹配内置 Logo；未匹配到品牌时会提示手动加载 Logo。
 - 支持缓存设置和 Logo 路径，下次打开不用重新配置。
+- 桌面版关闭前会弹出确认提示，避免误关窗口。
 - 支持鼠标滚轮翻页、键盘翻页、后台持续预渲染和预览缓存。
 - 支持更清晰的加载动画和导出进度条。
 - 支持导出 JPEG / PNG 合成图片。
@@ -54,6 +56,20 @@ pip install -r requirements.txt
 ```
 
 ## 启动
+
+桌面 App：
+
+```powershell
+python webapp\desktop.py
+```
+
+Windows 也可以双击：
+
+```text
+start-app.bat
+```
+
+浏览器模式：
 
 ```powershell
 python webapp\server.py
@@ -135,12 +151,14 @@ ExifTool 不是必需依赖；没有 ExifTool 时，工具仍会尝试使用 Pyt
 
 ```text
 webapp/               本地 Web 应用
+webapp/desktop.py     桌面 App 入口，启动本地服务并打开 WebView 窗口
 webapp/server.py      后端服务、EXIF 解析、渲染和导出
 webapp/static/        前端页面、样式和交互脚本
 webapp/logos/         内置品牌 Logo 与匹配规则
 tools/                可选工具脚本
 images/               README 示例图片
 requirements.txt      Python 依赖
+start-app.bat         Windows 桌面 App 启动脚本
 start-web.bat         Windows 启动脚本
 ```
 

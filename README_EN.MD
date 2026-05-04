@@ -4,9 +4,9 @@
 
 [中文](README.MD)
 
-EXIF-Banner is a local photo EXIF banner generator. It runs on your computer, uses the browser as the UI, scans local albums, reads EXIF metadata, and batch-exports composite images or PPTX decks with a clean parameter banner.
+EXIF-Banner is a local photo EXIF banner generator. It runs as a desktop app with a local Web UI, scans local albums, reads EXIF metadata, and batch-exports composite images or PPTX decks with a clean parameter banner.
 
-This project evolved from the earlier [PPT-EXIF-Banner](https://github.com/stlin256/PPT-EXIF-Banner) PowerPoint macro workflow. The macro-based approach required manually preparing ExifTool, exporting EXIF data, and then configuring image, CSV, and logo paths inside Office. EXIF-Banner turns that workflow into a local web app, reducing friction from Office macro security settings, repeated path selection, and batch processing.
+This project evolved from the earlier [PPT-EXIF-Banner](https://github.com/stlin256/PPT-EXIF-Banner) PowerPoint macro workflow. The macro-based approach required manually preparing ExifTool, exporting EXIF data, and then configuring image, CSV, and logo paths inside Office. EXIF-Banner turns that workflow into a local desktop app, reducing friction from Office macro security settings, repeated path selection, and batch processing.
 
 Author: [@stlin256](https://github.com/stlin256/EXIF-Banner)
 
@@ -16,7 +16,7 @@ Windows users can download the single-file executable:
 
 [Go to GitHub Releases](https://github.com/stlin256/EXIF-Banner/releases)
 
-Download and double-click the executable. It starts a local web service and opens the browser UI; album scanning, rendering, and export all happen on your computer.
+Download and double-click the executable. It starts a local service and opens a desktop window; album scanning, rendering, and export all happen on your computer. The Windows build uses the system WebView2 Runtime, which is usually already included with Windows 11.
 
 ## Examples
 
@@ -33,11 +33,13 @@ Example images:
 ## Features
 
 - Runs locally and does not upload photos or EXIF data.
-- Browser UI for choosing albums, manually choosing a logo, and previewing the banner.
+- Desktop app UI without manually opening a browser; browser mode remains available for development and troubleshooting.
+- Choose albums, manually choose a logo, and preview the banner.
 - Native EXIF parsing for common fields, with optional ExifTool enrichment when available.
 - Displays camera model, lens model, focal length, aperture, shutter speed, and ISO.
 - Automatically matches built-in logos by camera brand; prompts for manual logo loading when no brand rule matches.
 - Caches settings and logo path for the next launch.
+- Confirms before closing the desktop window to avoid accidental exits.
 - Supports smooth page navigation with mouse wheel, keyboard shortcuts, background preview pre-rendering, and preview caching.
 - Uses a cleaner loading animation and export progress indicator.
 - Exports JPEG / PNG composite images.
@@ -54,6 +56,20 @@ pip install -r requirements.txt
 ```
 
 ## Run
+
+Desktop app:
+
+```powershell
+python webapp\desktop.py
+```
+
+On Windows, you can also double-click:
+
+```text
+start-app.bat
+```
+
+Browser mode:
 
 ```powershell
 python webapp\server.py
@@ -135,12 +151,14 @@ ExifTool is optional. Without it, EXIF-Banner still attempts native Python parsi
 
 ```text
 webapp/               local web app
+webapp/desktop.py     desktop app entry; starts the local service and opens the WebView window
 webapp/server.py      backend service, EXIF parsing, rendering, and export
 webapp/static/        frontend page, styles, and interaction script
 webapp/logos/         built-in brand logos and matching rules
 tools/                optional utility scripts
 images/               README example images
 requirements.txt      Python dependencies
+start-app.bat         Windows desktop app launcher
 start-web.bat         Windows launcher
 ```
 
