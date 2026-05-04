@@ -50,7 +50,15 @@ LOGO_RULES_CACHE: tuple[int, list[dict[str, Any]]] | None = None
 LOGO_RULES_LOCK = Lock()
 PREVIEW_CACHE: OrderedDict[str, bytes] = OrderedDict()
 PREVIEW_CACHE_LOCK = Lock()
-PREVIEW_CACHE_LIMIT = 128
+PREVIEW_CACHE_BYTES = 0
+MIB = 1024 * 1024
+GIB = 1024 * MIB
+PREVIEW_CACHE_DEFAULT_BYTES = 1024 * MIB
+PREVIEW_CACHE_MIN_BYTES = 64 * MIB
+PREVIEW_CACHE_MAX_BYTES = 4 * GIB
+PREVIEW_CACHE_MIN_ITEMS = 256
+PREVIEW_CACHE_MAX_ITEMS = 4096
+PREVIEW_CACHE_ESTIMATED_ITEM_BYTES = 384 * 1024
 RESAMPLE = getattr(getattr(Image, "Resampling", Image), "LANCZOS")
 EXPORT_MAX_EDGE = 30000
 EXPORT_MAX_PIXELS = 250_000_000
@@ -715,11 +723,73 @@ def get_cached_preview(key: str) -> bytes | None:
 
 
 def remember_preview(key: str, data: bytes) -> None:
+    global PREVIEW_CACHE_BYTES
     with PREVIEW_CACHE_LOCK:
+        old_data = PREVIEW_CACHE.pop(key, None)
+        if old_data is not None:
+            PREVIEW_CACHE_BYTES -= len(old_data)
         PREVIEW_CACHE[key] = data
+        PREVIEW_CACHE_BYTES += len(data)
         PREVIEW_CACHE.move_to_end(key)
-        while len(PREVIEW_CACHE) > PREVIEW_CACHE_LIMIT:
-            PREVIEW_CACHE.popitem(last=False)
+        byte_limit = preview_cache_byte_limit()
+        item_limit = preview_cache_item_limit(byte_limit)
+        while len(PREVIEW_CACHE) > 1 and (
+            len(PREVIEW_CACHE) > item_limit or PREVIEW_CACHE_BYTES > byte_limit
+        ):
+            _, removed = PREVIEW_CACHE.popitem(last=False)
+            PREVIEW_CACHE_BYTES -= len(removed)
+
+
+def preview_cache_byte_limit() -> int:
+    available = available_memory_bytes()
+    if available is None:
+        return PREVIEW_CACHE_DEFAULT_BYTES
+    if available < 2 * GIB:
+        return int(max(PREVIEW_CACHE_MIN_BYTES, min(512 * MIB, available // 8)))
+    budget = (available - GIB) // 3
+    return int(max(512 * MIB, min(PREVIEW_CACHE_MAX_BYTES, budget)))
+
+
+def preview_cache_item_limit(byte_limit: int) -> int:
+    estimated = max(1, byte_limit // PREVIEW_CACHE_ESTIMATED_ITEM_BYTES)
+    return int(max(PREVIEW_CACHE_MIN_ITEMS, min(PREVIEW_CACHE_MAX_ITEMS, estimated)))
+
+
+def available_memory_bytes() -> int | None:
+    if os.name == "nt":
+        return windows_available_memory_bytes()
+    try:
+        page_size = os.sysconf("SC_PAGE_SIZE")
+        available_pages = os.sysconf("SC_AVPHYS_PAGES")
+        return int(page_size * available_pages)
+    except (AttributeError, OSError, ValueError):
+        return None
+
+
+def windows_available_memory_bytes() -> int | None:
+    try:
+        import ctypes
+
+        class MemoryStatusEx(ctypes.Structure):
+            _fields_ = [
+                ("dwLength", ctypes.c_ulong),
+                ("dwMemoryLoad", ctypes.c_ulong),
+                ("ullTotalPhys", ctypes.c_ulonglong),
+                ("ullAvailPhys", ctypes.c_ulonglong),
+                ("ullTotalPageFile", ctypes.c_ulonglong),
+                ("ullAvailPageFile", ctypes.c_ulonglong),
+                ("ullTotalVirtual", ctypes.c_ulonglong),
+                ("ullAvailVirtual", ctypes.c_ulonglong),
+                ("ullAvailExtendedVirtual", ctypes.c_ulonglong),
+            ]
+
+        status = MemoryStatusEx()
+        status.dwLength = ctypes.sizeof(MemoryStatusEx)
+        if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(status)):
+            return int(status.ullAvailPhys)
+    except Exception:
+        return None
+    return None
 
 
 def apply_derived_layout_settings(settings: dict[str, Any]) -> None:

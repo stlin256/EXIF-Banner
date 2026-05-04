@@ -19,8 +19,10 @@ const state = {
   previewSerial: 0,
   previewObjectUrl: "",
   previewCache: new Map(),
+  previewCacheBytes: 0,
   previewRequests: new Map(),
-  previewCacheLimit: 72,
+  previewCacheLimit: 512,
+  previewCacheMaxBytes: 1024 * 1024 * 1024,
   previewWarmQueue: [],
   previewWarmQueued: new Set(),
   previewWarmActive: new Set(),
@@ -260,6 +262,7 @@ function init() {
   state.language = normalizeLanguage(saved.language || "zh");
   state.sortMode = normalizeSortMode(saved.sortMode);
   state.settings = { ...defaults, ...(saved.settings || {}) };
+  configurePreviewCacheBudget();
   migrateLayoutSettings(saved.settings || {});
   loadLogoRules();
   if (saved.folder) {
@@ -317,6 +320,24 @@ function init() {
 
 function normalizeLanguage(language) {
   return language === "en" ? "en" : "zh";
+}
+
+function configurePreviewCacheBudget() {
+  const mib = 1024 * 1024;
+  const gib = 1024 * mib;
+  const deviceMemory = Number(navigator.deviceMemory || 0);
+  let budget = 512 * mib;
+  if (deviceMemory >= 16) {
+    budget = 2 * gib;
+  } else if (deviceMemory >= 8) {
+    budget = gib;
+  } else if (deviceMemory >= 4) {
+    budget = 512 * mib;
+  } else if (deviceMemory >= 2) {
+    budget = 384 * mib;
+  }
+  state.previewCacheMaxBytes = budget;
+  state.previewCacheLimit = Math.max(256, Math.min(4096, Math.round(budget / (384 * 1024))));
 }
 
 function setupLanguageControl() {
@@ -1733,7 +1754,7 @@ async function fetchPreviewUrl(index) {
       }
       const blob = await response.blob();
       const url = URL.createObjectURL(blob);
-      rememberPreview(key, url);
+      rememberPreview(key, url, blob.size || 0);
       return url;
     })
     .finally(() => {
@@ -1743,9 +1764,23 @@ async function fetchPreviewUrl(index) {
   return request;
 }
 
-function rememberPreview(key, url) {
-  state.previewCache.set(key, { url, used: performance.now() });
-  while (state.previewCache.size > state.previewCacheLimit) {
+function rememberPreview(key, url, bytes = 0) {
+  const existing = state.previewCache.get(key);
+  if (existing) {
+    URL.revokeObjectURL(existing.url);
+    state.previewCacheBytes -= existing.bytes || 0;
+  }
+  state.previewCache.set(key, { url, used: performance.now(), bytes });
+  state.previewCacheBytes += bytes;
+  trimPreviewCache();
+}
+
+function trimPreviewCache() {
+  const byteLimit = previewCacheByteLimit();
+  while (
+    state.previewCache.size > 1 &&
+    (state.previewCache.size > state.previewCacheLimit || state.previewCacheBytes > byteLimit)
+  ) {
     let oldestKey = "";
     let oldestUsed = Infinity;
     for (const [entryKey, entry] of state.previewCache) {
@@ -1760,9 +1795,26 @@ function rememberPreview(key, url) {
     const removed = state.previewCache.get(oldestKey);
     if (removed) {
       URL.revokeObjectURL(removed.url);
+      state.previewCacheBytes -= removed.bytes || 0;
     }
     state.previewCache.delete(oldestKey);
   }
+}
+
+function previewCacheByteLimit() {
+  const fallback = state.previewCacheMaxBytes || 512 * 1024 * 1024;
+  const memory = performance?.memory;
+  if (!memory?.jsHeapSizeLimit || !memory?.usedJSHeapSize) {
+    return fallback;
+  }
+  const usageRatio = memory.usedJSHeapSize / Math.max(1, memory.jsHeapSizeLimit);
+  if (usageRatio > 0.85) {
+    return Math.max(128 * 1024 * 1024, Math.floor(state.previewCacheBytes * 0.5));
+  }
+  if (usageRatio > 0.72) {
+    return Math.max(192 * 1024 * 1024, Math.floor(state.previewCacheBytes * 0.75));
+  }
+  return fallback;
 }
 
 function schedulePreviewWarmup(index, delay = 40, options = {}) {
@@ -1862,6 +1914,7 @@ function clearPreviewImages() {
     URL.revokeObjectURL(entry.url);
   }
   state.previewCache.clear();
+  state.previewCacheBytes = 0;
   state.previewRequests.clear();
 }
 
