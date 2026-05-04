@@ -756,15 +756,45 @@ def parse_aspect_ratio(value: str, fallback: tuple[int, int]) -> tuple[int, int]
 
 def render_composite(photo: dict[str, Any], settings: dict[str, Any]) -> Image.Image:
     settings = merged_settings(settings)
-    with Image.open(photo["path"]) as source_image:
-        image = ImageOps.exif_transpose(source_image).convert("RGB")
+    image = load_oriented_rgb(photo["path"])
 
     layout = composite_layout(image.width, image.height, settings)
+    return render_composite_from_image(photo, settings, image, layout)
+
+
+def render_preview_composite(photo: dict[str, Any], settings: dict[str, Any], max_size: int) -> Image.Image:
+    settings = preview_render_settings(settings, max_size)
+    image_width, image_height = oriented_image_size(photo)
+    layout = composite_layout(image_width, image_height, settings)
+    image = load_oriented_rgb(photo["path"], (layout["imageWidth"], layout["imageHeight"]))
+    return render_composite_from_image(photo, settings, image, layout)
+
+
+def preview_render_settings(settings: dict[str, Any], max_size: int) -> dict[str, Any]:
+    merged = merged_settings(settings)
+    max_size = clamp_int(max_size, 600, 2400, 1600)
+    long_edge = max(int(merged["slideWidth"]), int(merged["slideHeight"]))
+    if long_edge <= max_size:
+        return merged
+    scale = max_size / long_edge
+    preview = dict(merged)
+    preview["slideWidth"] = max(1, round(int(merged["slideWidth"]) * scale))
+    preview["slideHeight"] = max(1, round(int(merged["slideHeight"]) * scale))
+    preview["slideLongEdge"] = max(preview["slideWidth"], preview["slideHeight"])
+    preview["_fixedSlideSize"] = True
+    return preview
+
+
+def render_composite_from_image(
+    photo: dict[str, Any],
+    settings: dict[str, Any],
+    image: Image.Image,
+    layout: dict[str, int],
+) -> Image.Image:
     slide_width = layout["slideWidth"]
     slide_height = layout["slideHeight"]
     background = parse_color(settings.get("background", ""), (246, 244, 239))
     canvas = Image.new("RGB", (slide_width, slide_height), background)
-
     image = image.resize((layout["imageWidth"], layout["imageHeight"]), RESAMPLE)
 
     if settings.get("shadow", True):
@@ -781,6 +811,29 @@ def render_composite(photo: dict[str, Any], settings: dict[str, Any]) -> Image.I
         layout["bannerHeight"],
     )
     return canvas
+
+
+def load_oriented_rgb(path: str | Path, target_size: tuple[int, int] | None = None) -> Image.Image:
+    with Image.open(path) as source_image:
+        apply_decode_draft(source_image, target_size)
+        image = ImageOps.exif_transpose(source_image)
+        if image.mode != "RGB":
+            return image.convert("RGB")
+        return image.copy()
+
+
+def apply_decode_draft(image: Image.Image, target_size: tuple[int, int] | None) -> None:
+    if not target_size:
+        return
+    try:
+        target_width = max(1, int(target_size[0]))
+        target_height = max(1, int(target_size[1]))
+        orientation = image.getexif().get(274)
+        if orientation in {5, 6, 7, 8}:
+            target_width, target_height = target_height, target_width
+        image.draft("RGB", (target_width * 2, target_height * 2))
+    except Exception:
+        pass
 
 
 def composite_layout(image_width: int, image_height: int, settings: dict[str, Any]) -> dict[str, int]:
@@ -2267,11 +2320,10 @@ class Handler(SimpleHTTPRequestHandler):
         cache_key = preview_cache_key(album_id, index, photos[index], settings, max_size)
         data = get_cached_preview(cache_key)
         if data is None:
-            image = render_composite(photos[index], settings)
+            image = render_preview_composite(photos[index], settings, max_size)
             image.thumbnail((max_size, max_size), RESAMPLE)
             output = io.BytesIO()
-            quality = clamp_int(settings.get("quality"), 60, 100, 92)
-            image.save(output, "JPEG", quality=quality, optimize=True)
+            image.save(output, "JPEG", quality=88, subsampling=2)
             data = output.getvalue()
             remember_preview(cache_key, data)
         self.send_response(200)
@@ -2299,11 +2351,10 @@ class Handler(SimpleHTTPRequestHandler):
         index = int(params.get("index", ["0"])[0])
         max_size = clamp_int(params.get("max", ["1600"])[0], 100, 3000, 1600)
         photo = album["photos"][index]
-        with Image.open(photo["path"]) as image:
-            image = ImageOps.exif_transpose(image).convert("RGB")
-            image.thumbnail((max_size, max_size), RESAMPLE)
-            output = io.BytesIO()
-            image.save(output, "JPEG", quality=88, optimize=True)
+        image = load_oriented_rgb(photo["path"], (max_size, max_size))
+        image.thumbnail((max_size, max_size), RESAMPLE)
+        output = io.BytesIO()
+        image.save(output, "JPEG", quality=82, subsampling=2)
         data = output.getvalue()
         self.send_response(200)
         self.send_header("Content-Type", "image/jpeg")
