@@ -985,13 +985,10 @@ def draw_banner(
     )
     content_left = logo_left + logo_width + logo_gap + text_margin
 
-    info_font_size = max(10, int(canvas.height * float(settings["infoFontPct"]) / 100))
-    param_font_size = max(12, int(canvas.height * float(settings["paramFontPct"]) / 100))
-    info_font = load_font(info_font_size, bold=True)
-    param_font = load_font(param_font_size, bold=True)
-
     model = clean_text(text_overrides.get("model")) or exif.get("model") or "Unknown camera"
     lens = clean_text(text_overrides.get("lens")) or exif.get("lens") or "Unknown lens"
+    info_font_size = max(10, int(canvas.height * float(settings["infoFontPct"]) / 100))
+    info_font = load_font(info_font_size, bold=True, text=f"{model}\n{lens}")
     info_width = max(80, round(width * 0.5) - text_margin * 2)
     info_lines = [
         ellipsize(draw, model, info_font, info_width),
@@ -1008,6 +1005,8 @@ def draw_banner(
         )
 
     params = clean_text(text_overrides.get("params")) or format_params(exif)
+    param_font_size = max(12, int(canvas.height * float(settings["paramFontPct"]) / 100))
+    param_font = load_font(param_font_size, bold=True, text=params)
     param_left = left + int(width * 0.5)
     param_width = max(80, content_right - param_left)
     param_font = fit_font(params, param_font, param_width, int(height * 0.72))
@@ -1056,10 +1055,10 @@ def banner_edit_fields(
     )
     content_left = logo_left + logo_width + logo_gap + text_margin
 
+    model = clean_text(text_overrides.get("model")) or exif.get("model") or "Unknown camera"
+    lens = clean_text(text_overrides.get("lens")) or exif.get("lens") or "Unknown lens"
     info_font_size = max(10, int(slide_height * float(settings["infoFontPct"]) / 100))
-    param_font_size = max(12, int(slide_height * float(settings["paramFontPct"]) / 100))
-    info_font = load_font(info_font_size, bold=True)
-    param_font = load_font(param_font_size, bold=True)
+    info_font = load_font(info_font_size, bold=True, text=f"{model}\n{lens}")
     info_line_height = font_line_height(info_font)
     info_y = top + (height - info_line_height * 2) / 2
 
@@ -1069,6 +1068,8 @@ def banner_edit_fields(
     visual_info_width = max(1, min(info_width, param_left - content_left - text_margin))
 
     params = clean_text(text_overrides.get("params")) or format_params(exif)
+    param_font_size = max(12, int(slide_height * float(settings["paramFontPct"]) / 100))
+    param_font = load_font(param_font_size, bold=True, text=params)
     param_font = fit_font(params, param_font, param_width, int(height * 0.72))
     param_line_height = font_line_height(param_font)
     param_y = top + (height - param_line_height) / 2
@@ -1143,7 +1144,7 @@ def logo_or_brand_metrics(
 
     brand = brand_override or clean_text(settings.get("brandText")) or infer_brand(exif)
     font_size = max(12, int(layout["slideHeight"] * float(settings["brandFontPct"]) / 100))
-    font = fit_font(brand, load_font(font_size, bold=True), width, height)
+    font = fit_font(brand, load_font(font_size, bold=True, text=brand), width, height)
     brand = ellipsize(draw, brand, font, width)
     bbox = draw.textbbox((0, 0), brand, font=font)
     return max(1, bbox[2] - bbox[0]), False, getattr(font, "size", font_size), font_line_height(font)
@@ -1244,7 +1245,7 @@ def draw_logo_or_brand(
 
     brand = brand_override or clean_text(settings.get("brandText")) or infer_brand(exif)
     font_size = max(12, int(canvas.height * float(settings["brandFontPct"]) / 100))
-    font = fit_font(brand, load_font(font_size, bold=True), width, height)
+    font = fit_font(brand, load_font(font_size, bold=True, text=brand), width, height)
     brand = ellipsize(draw, brand, font, width)
     bbox = draw.textbbox((0, 0), brand, font=font)
     draw.text(
@@ -1375,15 +1376,61 @@ def format_params(exif: dict[str, str]) -> str:
     return "    ".join(values) or "No EXIF"
 
 
-def load_font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
-    candidates = [
-        Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts" / ("segoeuib.ttf" if bold else "segoeui.ttf"),
-        Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts" / ("arialbd.ttf" if bold else "arial.ttf"),
-    ]
-    for candidate in candidates:
+def load_font(size: int, bold: bool = False, text: str = "") -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+    for candidate in font_candidates(bold, text):
         if candidate.exists():
-            return ImageFont.truetype(str(candidate), size)
+            try:
+                return ImageFont.truetype(str(candidate), size)
+            except OSError:
+                continue
     return ImageFont.load_default()
+
+
+def font_candidates(bold: bool, text: str = "") -> list[Path]:
+    font_dir = Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts"
+    preferred = [
+        "segoeuib.ttf" if bold else "segoeui.ttf",
+        "arialbd.ttf" if bold else "arial.ttf",
+    ]
+    multilingual = [
+        "NotoSansSC-VF.ttf",
+        "msyhbd.ttc" if bold else "msyh.ttc",
+        "msyh.ttc",
+        "msyhbd.ttc",
+        "simhei.ttf",
+        "simsun.ttc",
+        "msjhbd.ttc" if bold else "msjh.ttc",
+        "msjh.ttc",
+        "YuGothB.ttc" if bold else "YuGothR.ttc",
+        "YuGothM.ttc",
+        "malgunbd.ttf" if bold else "malgun.ttf",
+        "malgun.ttf",
+        "seguisym.ttf",
+    ]
+    if needs_multilingual_font(text):
+        names = multilingual + preferred
+    else:
+        names = preferred + multilingual
+
+    candidates: list[Path] = []
+    seen: set[str] = set()
+    for name in names:
+        path = font_dir / name
+        key = str(path).lower()
+        if key not in seen:
+            candidates.append(path)
+            seen.add(key)
+    return candidates
+
+
+def needs_multilingual_font(text: str) -> bool:
+    return any(
+        "\u2e80" <= char <= "\u9fff"
+        or "\uf900" <= char <= "\ufaff"
+        or "\u3040" <= char <= "\u30ff"
+        or "\uac00" <= char <= "\ud7af"
+        for char in text
+    )
 
 
 def font_line_height(font: ImageFont.ImageFont) -> int:
@@ -1399,12 +1446,12 @@ def fit_font(text: str, font: ImageFont.ImageFont, max_width: int, max_height: i
         return font
     size = font.size
     while size > 8:
-        test_font = load_font(size, bold=True)
+        test_font = load_font(size, bold=True, text=text)
         bbox = ImageDraw.Draw(Image.new("RGB", (1, 1))).textbbox((0, 0), text, font=test_font)
         if bbox[2] - bbox[0] <= max_width and bbox[3] - bbox[1] <= max_height:
             return test_font
         size -= 1
-    return load_font(8, bold=True)
+    return load_font(8, bold=True, text=text)
 
 
 def ellipsize(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.ImageFont, max_width: int) -> str:

@@ -31,6 +31,8 @@ const state = {
   bannerLayoutRequests: new Map(),
   bannerLayoutCacheLimit: 72,
   bannerEditTimer: 0,
+  bannerUndoStack: [],
+  bannerUndoLimit: 80,
   photoItems: new Map(),
   activePhotoItem: null,
   saveTimer: 0,
@@ -74,6 +76,8 @@ const defaults = {
   exportScalePct: 100,
 };
 
+const RESETTABLE_BANNER_TEXT_FIELDS = ["model", "lens", "params"];
+
 const translations = {
   zh: {
     "placeholder.albumFolder": "选择相册文件夹",
@@ -86,6 +90,7 @@ const translations = {
     "button.selectAll": "全选",
     "button.clear": "清空",
     "button.reset": "重置",
+    "button.resetParamsText": "重置参数内容",
     "button.pickLogo": "选择 Logo",
     "button.done": "完成",
     "button.switchLanguage": "切换语言",
@@ -106,6 +111,7 @@ const translations = {
     "field.bannerColor": "横幅色",
     "field.logoPath": "Logo 路径",
     "field.brandText": "品牌文字",
+    "field.paramsText": "参数内容",
     "field.aspectRatio": "底片比例",
     "field.exportFormat": "导出格式",
     "slider.bannerWidth": "横幅宽度",
@@ -164,6 +170,7 @@ const translations = {
     "button.selectAll": "Select All",
     "button.clear": "Clear",
     "button.reset": "Reset",
+    "button.resetParamsText": "Reset Params",
     "button.pickLogo": "Choose Logo",
     "button.done": "Done",
     "button.switchLanguage": "Switch Language",
@@ -184,6 +191,7 @@ const translations = {
     "field.bannerColor": "Banner Color",
     "field.logoPath": "Logo Path",
     "field.brandText": "Brand Text",
+    "field.paramsText": "Params Text",
     "field.aspectRatio": "Canvas Ratio",
     "field.exportFormat": "Export Format",
     "slider.bannerWidth": "Banner Width",
@@ -261,6 +269,7 @@ function init() {
   $("exportImagesBtn").addEventListener("click", () => exportAlbum("images"));
   $("exportPptxBtn").addEventListener("click", () => exportAlbum("pptx"));
   $("resetBtn").addEventListener("click", resetSettings);
+  $("resetParamsTextBtn").addEventListener("click", resetParamsTextOverride);
   $("selectAllBtn").addEventListener("click", selectAllPhotos);
   $("clearSelectionBtn").addEventListener("click", clearPhotoSelection);
   $("exportCompleteCloseBtn").addEventListener("click", hideExportCompleteDialog);
@@ -321,6 +330,8 @@ function setupBannerEditing() {
   for (const field of bannerEditFields()) {
     field.addEventListener("focus", handleBannerEditFocus);
     field.addEventListener("input", handleBannerEditInput);
+    field.addEventListener("compositionstart", handleBannerCompositionStart);
+    field.addEventListener("compositionend", handleBannerCompositionEnd);
     field.addEventListener("blur", handleBannerEditBlur);
     field.addEventListener("keydown", handleBannerEditKeydown);
     field.addEventListener("paste", pastePlainText);
@@ -470,6 +481,7 @@ function applyI18n() {
     $("captureDateText").title = "";
     $("bannerEditLayer").hidden = true;
   }
+  updateParamsResetControl();
   updateSortControl();
   applyStatusMessage();
   renderExportCompleteDialog();
@@ -605,6 +617,7 @@ async function scan(options = {}) {
     state.photos = data.photos;
     state.current = 0;
     state.exifSource = data.exifSource;
+    state.bannerUndoStack = [];
     state.missingLogoNotices.clear();
     const saved = loadSavedState();
     state.selected = restoredSelection(data.photos, saved, folder);
@@ -830,6 +843,11 @@ function handleKeyNavigation(event) {
     hideExportCompleteDialog();
     return;
   }
+  if (isUndoShortcut(event) && shouldHandleBannerUndo(event.target)) {
+    event.preventDefault();
+    undoBannerTextEdit();
+    return;
+  }
   if (!state.photos.length || isTypingTarget(event.target)) {
     return;
   }
@@ -840,6 +858,23 @@ function handleKeyNavigation(event) {
     event.preventDefault();
     movePhoto(-1);
   }
+}
+
+function isUndoShortcut(event) {
+  return (event.ctrlKey || event.metaKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === "z";
+}
+
+function shouldHandleBannerUndo(target) {
+  if (!state.bannerUndoStack.length) {
+    return false;
+  }
+  if (!target || !target.tagName) {
+    return true;
+  }
+  if (target.isContentEditable) {
+    return false;
+  }
+  return !["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName);
 }
 
 function isTypingTarget(target) {
@@ -938,9 +973,72 @@ function writeSettings() {
 
 function resetSettings() {
   state.settings = { ...defaults };
+  state.bannerUndoStack = [];
   writeSettings();
   saveState();
   updatePreview();
+}
+
+function resetParamsTextOverride() {
+  resetBannerTextOverrides(RESETTABLE_BANNER_TEXT_FIELDS);
+}
+
+function resetBannerTextOverrides(fields) {
+  const photo = state.photos[state.current];
+  if (!photo) {
+    return false;
+  }
+  const key = photoOverrideKey(photo);
+  const previousOverrides = cloneBannerOverrides(state.settings.bannerTextOverrides);
+  const overrides = cloneBannerOverrides(state.settings.bannerTextOverrides);
+  const photoOverrides = { ...(overrides[key] || {}) };
+  let changed = false;
+
+  for (const field of fields) {
+    if (Object.prototype.hasOwnProperty.call(photoOverrides, field)) {
+      delete photoOverrides[field];
+      changed = true;
+    }
+  }
+
+  if (!changed) {
+    updateParamsResetControl();
+    return false;
+  }
+  if (Object.keys(photoOverrides).length) {
+    overrides[key] = photoOverrides;
+  } else {
+    delete overrides[key];
+  }
+
+  state.settings.bannerTextOverrides = overrides;
+  pushBannerUndoSnapshot(previousOverrides);
+  scheduleSaveState();
+  updateParamsResetControl();
+  clearPreviewCache();
+  updatePreview();
+  syncBannerEditTexts(photo, { forceActive: true });
+  return true;
+}
+
+function updateParamsResetControl() {
+  const button = $("resetParamsTextBtn");
+  if (!button) {
+    return;
+  }
+  button.disabled = !hasAnyBannerTextOverride(state.photos[state.current], RESETTABLE_BANNER_TEXT_FIELDS);
+}
+
+function hasAnyBannerTextOverride(photo, fields) {
+  return fields.some((field) => hasBannerTextOverride(photo, field));
+}
+
+function hasBannerTextOverride(photo, field) {
+  if (!photo || !field) {
+    return false;
+  }
+  const overrides = state.settings?.bannerTextOverrides?.[photoOverrideKey(photo)];
+  return !!overrides && Object.prototype.hasOwnProperty.call(overrides, field);
 }
 
 function loadSavedState() {
@@ -1021,6 +1119,7 @@ function updatePreview() {
 
   updateMetaStrip(photo);
   updateBannerEditLayer(photo);
+  updateParamsResetControl();
   maybePromptMissingLogo(photo);
   scheduleServerPreview();
 }
@@ -1076,12 +1175,7 @@ function applyBannerEditLayout(photo, layout) {
   const scaleY = canvasHeight / Math.max(1, Number(layout.slideHeight || 1));
   const texts = bannerTexts(photo);
   const defaultTexts = defaultBannerTexts(photo);
-  const elements = {
-    brand: $("brandEditField"),
-    model: $("modelEditField"),
-    lens: $("lensEditField"),
-    params: $("paramsEditField"),
-  };
+  const elements = bannerEditElements();
 
   for (const [name, element] of Object.entries(elements)) {
     const rect = layout.fields[name];
@@ -1103,6 +1197,33 @@ function applyBannerEditLayout(photo, layout) {
       textAlign: rect.align || "left",
     });
     if (document.activeElement !== element) {
+      element.textContent = texts[name] || "";
+    }
+  }
+}
+
+function bannerEditElements() {
+  return {
+    brand: $("brandEditField"),
+    model: $("modelEditField"),
+    lens: $("lensEditField"),
+    params: $("paramsEditField"),
+  };
+}
+
+function syncBannerEditTexts(photo, options = {}) {
+  if (!photo) {
+    return;
+  }
+  const texts = bannerTexts(photo);
+  const defaultTexts = defaultBannerTexts(photo);
+  for (const [name, element] of Object.entries(bannerEditElements())) {
+    if (!element) {
+      continue;
+    }
+    element.dataset.defaultValue = defaultTexts[name] || "";
+    element.dataset.currentValue = texts[name] || "";
+    if (options.forceActive || document.activeElement !== element) {
       element.textContent = texts[name] || "";
     }
   }
@@ -1166,16 +1287,34 @@ function handleBannerEditFocus(event) {
   const field = event.currentTarget;
   field.textContent = field.dataset.currentValue || "";
   field.dataset.editStartValue = field.dataset.currentValue || "";
+  field.dataset.editStartOverrides = serializeBannerOverrides(state.settings.bannerTextOverrides);
   selectEditableText(field);
+}
+
+function handleBannerCompositionStart(event) {
+  const field = event.currentTarget;
+  field.dataset.composing = "true";
+  window.clearTimeout(state.bannerEditTimer);
+  state.bannerEditTimer = 0;
+}
+
+function handleBannerCompositionEnd(event) {
+  const field = event.currentTarget;
+  delete field.dataset.composing;
+  handleBannerEditInput(event);
 }
 
 function handleBannerEditInput(event) {
   const field = event.currentTarget;
+  if (field.dataset.composing === "true") {
+    return;
+  }
   window.clearTimeout(state.bannerEditTimer);
   state.bannerEditTimer = window.setTimeout(() => {
     state.bannerEditTimer = 0;
     const changed = commitBannerTextEdit(field.dataset.bannerField, field.textContent, {
       refreshLayout: false,
+      recordUndo: false,
     });
     if (changed) {
       field.dataset.liveCommitted = "true";
@@ -1194,23 +1333,40 @@ function handleBannerEditBlur(event) {
     if (field.dataset.liveCommitted === "true") {
       commitBannerTextEdit(field.dataset.bannerField, restored, {
         forceRefresh: true,
+        recordUndo: false,
         refreshLayout: true,
       });
     }
     delete field.dataset.liveCommitted;
     delete field.dataset.editStartValue;
+    delete field.dataset.editStartOverrides;
+    delete field.dataset.composing;
     field.textContent = restored;
     return;
   }
   commitBannerTextEdit(field.dataset.bannerField, field.textContent, {
     forceRefresh: field.dataset.liveCommitted === "true",
+    recordUndo: false,
     refreshLayout: true,
   });
+  recordBannerEditSessionUndo(field);
   delete field.dataset.liveCommitted;
   delete field.dataset.editStartValue;
+  delete field.dataset.editStartOverrides;
+  delete field.dataset.composing;
 }
 
 function handleBannerEditKeydown(event) {
+  if (isUndoShortcut(event)) {
+    const field = event.currentTarget;
+    const current = normalizeBannerEditValue(field.textContent);
+    const committed = normalizeBannerEditValue(field.dataset.currentValue || "");
+    if (current === committed && state.bannerUndoStack.length) {
+      event.preventDefault();
+      undoBannerTextEdit();
+    }
+    return;
+  }
   if (event.key === "Enter") {
     event.preventDefault();
     event.currentTarget.blur();
@@ -1246,6 +1402,7 @@ function commitBannerTextEdit(field, value, options = {}) {
   const normalized = normalizeBannerEditValue(value);
   const defaultsForPhoto = defaultBannerTexts(photo);
   const key = photoOverrideKey(photo);
+  const previousOverrides = cloneBannerOverrides(state.settings.bannerTextOverrides);
   const overrides = { ...(state.settings.bannerTextOverrides || {}) };
   const photoOverrides = { ...(overrides[key] || {}) };
   const previous = photoOverrides[field] || "";
@@ -1264,8 +1421,12 @@ function commitBannerTextEdit(field, value, options = {}) {
   if (!changed && !options.forceRefresh) {
     return false;
   }
+  if (changed && options.recordUndo !== false) {
+    pushBannerUndoSnapshot(previousOverrides);
+  }
   state.settings.bannerTextOverrides = overrides;
   scheduleSaveState();
+  updateParamsResetControl();
   if (options.refreshLayout === false) {
     clearPreviewImages();
     scheduleServerPreview();
@@ -1278,6 +1439,64 @@ function commitBannerTextEdit(field, value, options = {}) {
 
 function normalizeBannerEditValue(value) {
   return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+function recordBannerEditSessionUndo(field) {
+  const start = parseBannerOverrides(field.dataset.editStartOverrides);
+  const current = state.settings.bannerTextOverrides || {};
+  if (!sameBannerOverrides(start, current)) {
+    pushBannerUndoSnapshot(start);
+  }
+}
+
+function undoBannerTextEdit() {
+  const snapshot = state.bannerUndoStack.pop();
+  if (!snapshot) {
+    return false;
+  }
+  window.clearTimeout(state.bannerEditTimer);
+  state.bannerEditTimer = 0;
+  state.settings.bannerTextOverrides = cloneBannerOverrides(snapshot);
+  scheduleSaveState();
+  updateParamsResetControl();
+  clearPreviewCache();
+  updatePreview();
+  if (state.photos[state.current]) {
+    syncBannerEditTexts(state.photos[state.current], { forceActive: true });
+  }
+  return true;
+}
+
+function pushBannerUndoSnapshot(snapshot) {
+  const normalized = cloneBannerOverrides(snapshot);
+  const previous = state.bannerUndoStack[state.bannerUndoStack.length - 1];
+  if (previous && sameBannerOverrides(previous, normalized)) {
+    return;
+  }
+  state.bannerUndoStack.push(normalized);
+  while (state.bannerUndoStack.length > state.bannerUndoLimit) {
+    state.bannerUndoStack.shift();
+  }
+}
+
+function serializeBannerOverrides(overrides) {
+  return JSON.stringify(cloneBannerOverrides(overrides));
+}
+
+function parseBannerOverrides(value) {
+  try {
+    return cloneBannerOverrides(JSON.parse(value || "{}"));
+  } catch {
+    return {};
+  }
+}
+
+function cloneBannerOverrides(overrides) {
+  return JSON.parse(JSON.stringify(overrides || {}));
+}
+
+function sameBannerOverrides(left, right) {
+  return serializeBannerOverrides(left) === serializeBannerOverrides(right);
 }
 
 function photoOverrideKey(photo) {

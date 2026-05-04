@@ -504,7 +504,7 @@ input[type="color"] {
   color: transparent;
   caret-color: #fff;
   cursor: text;
-  font-family: "Segoe UI", Arial, sans-serif;
+  font-family: "Segoe UI", "Microsoft YaHei", "Microsoft JhengHei", "Noto Sans CJK SC", Arial, sans-serif;
   font-weight: 700;
   outline: none;
   padding: 0;
@@ -599,6 +599,10 @@ input[type="color"] {
 .field.pickerRow {
   grid-template-columns: 1fr;
   align-items: stretch;
+}
+
+.field.actionRow button {
+  justify-self: start;
 }
 
 .pickerField {
