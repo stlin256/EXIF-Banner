@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import locale
 import os
 from http.server import ThreadingHTTPServer
 from pathlib import Path
@@ -29,6 +30,21 @@ DEFAULT_HEIGHT = 860
 MIN_WIDTH = 1024
 MIN_HEIGHT = 680
 
+LOCALIZATIONS = {
+    "en": {
+        "global.quitConfirmation": "Do you really want to quit EXIF-Banner?",
+        "global.ok": "OK",
+        "global.quit": "Quit",
+        "global.cancel": "Cancel",
+    },
+    "zh": {
+        "global.quitConfirmation": "确定要退出 EXIF-Banner 吗？",
+        "global.ok": "确定",
+        "global.quit": "退出",
+        "global.cancel": "取消",
+    },
+}
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run EXIF-Banner as a desktop app.")
@@ -40,6 +56,12 @@ def parse_args() -> argparse.Namespace:
         help="Local HTTP port. Use 0 to let the OS choose an available port.",
     )
     parser.add_argument("--debug", action="store_true", help="Enable pywebview debug tools.")
+    parser.add_argument(
+        "--language",
+        choices=("auto", "zh", "en"),
+        default="auto",
+        help="Desktop shell language. Use auto to follow the system language.",
+    )
     return parser.parse_args()
 
 
@@ -78,13 +100,38 @@ def webview_storage_path() -> str | None:
     return None
 
 
-def start_webview(url: str, debug: bool) -> None:
+def desktop_language(language: str) -> str:
+    if language in ("zh", "en"):
+        return language
+
+    values = [
+        os.environ.get("LANGUAGE", ""),
+        os.environ.get("LC_ALL", ""),
+        os.environ.get("LC_MESSAGES", ""),
+        os.environ.get("LANG", ""),
+    ]
+    for category in (locale.LC_CTYPE, locale.LC_TIME):
+        try:
+            values.append(locale.getlocale(category)[0] or "")
+        except (TypeError, ValueError):
+            continue
+    text = " ".join(values).casefold()
+    return "zh" if "zh" in text or "chinese" in text else "en"
+
+
+def desktop_localization(language: str) -> dict[str, str]:
+    return LOCALIZATIONS[desktop_language(language)]
+
+
+def start_webview(url: str, debug: bool, language: str) -> None:
     webview.create_window(
         APP_TITLE,
         url,
         width=DEFAULT_WIDTH,
         height=DEFAULT_HEIGHT,
         min_size=(MIN_WIDTH, MIN_HEIGHT),
+        confirm_close=True,
+        localization=desktop_localization(language),
     )
     start_kwargs: dict[str, Any] = {"debug": debug, "private_mode": False}
     storage_path = webview_storage_path()
@@ -102,7 +149,7 @@ def main() -> None:
     args = parse_args()
     server, thread, url = start_local_server(args.host, args.port)
     try:
-        start_webview(url, args.debug)
+        start_webview(url, args.debug, args.language)
     finally:
         shutdown_server(server, thread)
 
