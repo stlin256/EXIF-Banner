@@ -155,12 +155,10 @@ def find_exiftool(root: Path) -> str | None:
 def read_exif_batch(paths: list[Path], root: Path, recursive: bool) -> tuple[dict[str, dict[str, str]], str]:
     native_results: dict[str, dict[str, str]] = {}
     native_failures = 0
-    for path in paths:
-        try:
-            native_results[str(path.resolve())] = read_with_native_python(path)
-        except Exception:
+    for path, metadata, failed in read_native_exif_parallel(paths):
+        native_results[str(path.resolve())] = metadata
+        if failed:
             native_failures += 1
-            native_results[str(path.resolve())] = {}
     if any(has_useful_exif(metadata) for metadata in native_results.values()):
         source = "Native Python"
         if native_failures:
@@ -174,6 +172,29 @@ def read_exif_batch(paths: list[Path], root: Path, recursive: bool) -> tuple[dic
         except Exception:
             pass
     return native_results, "Native Python"
+
+
+def read_native_exif_parallel(paths: list[Path]) -> list[tuple[Path, dict[str, str], bool]]:
+    if not paths:
+        return []
+    workers = background_worker_count(len(paths))
+    if workers <= 1:
+        return [read_native_exif_item(path) for path in paths]
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        return list(executor.map(read_native_exif_item, paths))
+
+
+def read_native_exif_item(path: Path) -> tuple[Path, dict[str, str], bool]:
+    try:
+        return path, read_with_native_python(path), False
+    except Exception:
+        return path, {}, True
+
+
+def background_worker_count(total: int) -> int:
+    cpu_count = os.cpu_count() or 2
+    workers = max(1, cpu_count - 1)
+    return min(workers, max(1, total))
 
 
 def has_useful_exif(metadata: dict[str, str]) -> bool:
