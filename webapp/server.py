@@ -12,6 +12,7 @@ import shutil
 import subprocess
 import sys
 import importlib.util
+import tempfile
 import time
 import uuid
 import webbrowser
@@ -1748,8 +1749,9 @@ def export_pptx(album_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     output_file = Path(payload.get("outputFile") or output_dir / f"{root.name}_banner_{timestamp()}.pptx")
 
     deck_settings = export_settings_for_deck(photos, settings)
-    rendered_images = render_pptx_images_parallel(photos, deck_settings)
-    write_pptx(output_file, rendered_images, int(deck_settings["slideWidth"]), int(deck_settings["slideHeight"]))
+    with tempfile.TemporaryDirectory(prefix=".exif-banner-pptx-", dir=str(output_dir)) as temp_root:
+        rendered_images = render_pptx_images_parallel(photos, deck_settings, temp_dir=Path(temp_root))
+        write_pptx(output_file, rendered_images, int(deck_settings["slideWidth"]), int(deck_settings["slideHeight"]))
     return {"count": len(photos), "outputFile": str(output_file)}
 
 
@@ -1832,16 +1834,18 @@ def export_pptx_with_progress(
     output_file = unique_path(output_dir / f"{root.name}_banner_{timestamp()}.pptx")
     total = max(1, len(photos) + 1)
     deck_settings = export_settings_for_deck(photos, settings)
-    rendered_images = render_pptx_images_parallel(
-        photos,
-        deck_settings,
-        job_id,
-        total,
-        "渲染幻灯片",
-        progress_total=len(photos),
-    )
-    update_export_job(job_id, done=len(photos), total=total, progress=len(photos) / total, message="写入 PPTX")
-    write_pptx(output_file, rendered_images, int(deck_settings["slideWidth"]), int(deck_settings["slideHeight"]))
+    with tempfile.TemporaryDirectory(prefix=".exif-banner-pptx-", dir=str(output_dir)) as temp_root:
+        rendered_images = render_pptx_images_parallel(
+            photos,
+            deck_settings,
+            job_id,
+            total,
+            "渲染幻灯片",
+            progress_total=len(photos),
+            temp_dir=Path(temp_root),
+        )
+        update_export_job(job_id, done=len(photos), total=total, progress=len(photos) / total, message="写入 PPTX")
+        write_pptx(output_file, rendered_images, int(deck_settings["slideWidth"]), int(deck_settings["slideHeight"]))
     update_export_job(job_id, done=total, total=total, progress=1, message="写入 PPTX")
     return {"count": len(photos), "outputFile": str(output_file)}
 
@@ -1899,6 +1903,7 @@ def render_pptx_images_parallel(
     total: int | None = None,
     message_prefix: str = "渲染幻灯片",
     progress_total: int | None = None,
+    temp_dir: Path | None = None,
 ) -> list[dict[str, Any]]:
     if not photos:
         return []
@@ -1916,11 +1921,20 @@ def render_pptx_images_parallel(
 
     ordered: list[dict[str, Any] | None] = [None] * len(photos)
     completed = 0
+    image_ext = export_extension(settings)
+    if temp_dir is not None:
+        temp_dir.mkdir(parents=True, exist_ok=True)
     with ThreadPoolExecutor(max_workers=workers) as executor:
-        future_map = {
-            executor.submit(render_export_photo_bytes, photo, settings): index
-            for index, photo in enumerate(photos)
-        }
+        if temp_dir is None:
+            future_map = {
+                executor.submit(render_export_photo_bytes, photo, settings): index
+                for index, photo in enumerate(photos)
+            }
+        else:
+            future_map = {
+                executor.submit(render_export_photo_file, photo, temp_dir / f"slide_{index + 1:05d}.{image_ext}", settings): index
+                for index, photo in enumerate(photos)
+            }
         for future in as_completed(future_map):
             index = future_map[future]
             ordered[index] = future.result()
@@ -1948,6 +1962,17 @@ def render_export_photo_bytes(photo: dict[str, Any], settings: dict[str, Any]) -
     render_settings = settings if settings.get("_fixedSlideSize") else export_settings_for_photo(photo, settings)
     image = render_composite(photo, render_settings)
     return export_image_bytes(image, render_settings, for_pptx=True)
+
+
+def render_export_photo_file(photo: dict[str, Any], target: Path, settings: dict[str, Any]) -> dict[str, Any]:
+    render_settings = settings if settings.get("_fixedSlideSize") else export_settings_for_photo(photo, settings)
+    image = render_composite(photo, render_settings)
+    save_pptx_image(image, target, render_settings)
+    return {
+        "path": str(target),
+        "ext": export_extension(render_settings),
+        "mime": export_mime(render_settings),
+    }
 
 
 def export_worker_count(settings: dict[str, Any], total: int) -> int:
@@ -2027,6 +2052,16 @@ def save_jpeg(image: Image.Image, target: Path, settings: dict[str, Any]) -> Non
     image.save(target, "JPEG", **jpeg_save_options(settings))
 
 
+def save_pptx_image(image: Image.Image, target: Path, settings: dict[str, Any]) -> None:
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if export_format(settings) == "png":
+        save_png(image, target)
+        return
+    if image.mode != "RGB":
+        image = image.convert("RGB")
+    image.save(target, "JPEG", **jpeg_save_options(settings, for_pptx=True))
+
+
 def export_image_bytes(image: Image.Image, settings: dict[str, Any], for_pptx: bool = False) -> dict[str, Any]:
     output = io.BytesIO()
     if export_format(settings) == "png":
@@ -2055,6 +2090,10 @@ def export_format(settings: dict[str, Any]) -> str:
     if value == "png":
         return "png"
     return "jpeg"
+
+
+def export_mime(settings: dict[str, Any]) -> str:
+    return "image/png" if export_format(settings) == "png" else "image/jpeg"
 
 
 def export_extension(settings: dict[str, Any]) -> str:
@@ -2118,9 +2157,9 @@ def write_pptx(output_file: Path, rendered_images: list[dict[str, Any]], width_p
 
     for rendered in rendered_images:
         slide = presentation.slides.add_slide(blank_layout)
-        image_stream = io.BytesIO(rendered["data"])
+        image_source = str(rendered["path"]) if rendered.get("path") else io.BytesIO(rendered["data"])
         slide.shapes.add_picture(
-            image_stream,
+            image_source,
             0,
             0,
             width=presentation.slide_width,
