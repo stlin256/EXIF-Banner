@@ -1244,6 +1244,126 @@ def preview_disk_cache_limit(directory: Path) -> int:
         return PREVIEW_DISK_CACHE_MIN_BYTES
 
 
+def cache_stats() -> dict[str, Any]:
+    cache_dir = app_cache_dir()
+    preview_dir = cache_dir / "preview-cache" if cache_dir else None
+    preview_disk = directory_file_stats(preview_dir, "*.jpg") if preview_dir else {"items": 0, "bytes": 0}
+    with PREVIEW_CACHE_LOCK:
+        preview_memory = {"items": len(PREVIEW_CACHE), "bytes": PREVIEW_CACHE_BYTES}
+    return {
+        "cacheDir": str(cache_dir) if cache_dir else "",
+        "previewMemory": preview_memory,
+        "previewDisk": preview_disk,
+        "exif": exif_cache_stats(),
+    }
+
+
+def directory_file_stats(directory: Path | None, pattern: str = "*") -> dict[str, int]:
+    if directory is None:
+        return {"items": 0, "bytes": 0}
+    items = 0
+    total = 0
+    try:
+        for path in directory.glob(pattern):
+            if not path.is_file():
+                continue
+            try:
+                stat = path.stat()
+                items += 1
+                total += stat.st_size
+            except OSError:
+                continue
+    except OSError:
+        pass
+    return {"items": items, "bytes": total}
+
+
+def exif_cache_stats() -> dict[str, Any]:
+    cache = load_exif_cache()
+    if is_sqlite_exif_cache(cache):
+        db_path = Path(str(cache["path"]))
+        items = 0
+        try:
+            with EXIF_CACHE_LOCK:
+                with sqlite3.connect(db_path, timeout=30) as connection:
+                    row = connection.execute("SELECT COUNT(*) FROM exif_cache").fetchone()
+                    items = int(row[0] or 0) if row else 0
+        except sqlite3.Error:
+            items = 0
+        size = (
+            file_size(db_path)
+            + file_size(db_path.with_suffix(db_path.suffix + "-wal"))
+            + file_size(db_path.with_suffix(db_path.suffix + "-shm"))
+        )
+        return {"backend": "sqlite", "items": items, "bytes": size}
+    entries = cache.get("entries")
+    path = exif_cache_json_path()
+    return {
+        "backend": "json",
+        "items": len(entries) if isinstance(entries, dict) else 0,
+        "bytes": file_size(path) if path else 0,
+    }
+
+
+def file_size(path: Path) -> int:
+    try:
+        return path.stat().st_size
+    except OSError:
+        return 0
+
+
+def clear_cache(kind: str) -> dict[str, Any]:
+    kind = clean_text(kind).lower()
+    if kind not in {"preview", "exif", "all"}:
+        raise ValueError("Unsupported cache type.")
+    if kind in {"preview", "all"}:
+        clear_preview_cache_storage()
+    if kind in {"exif", "all"}:
+        clear_exif_cache_storage()
+    return {"ok": True, "stats": cache_stats()}
+
+
+def clear_preview_cache_storage() -> None:
+    global PREVIEW_CACHE_BYTES
+    with PREVIEW_CACHE_LOCK:
+        PREVIEW_CACHE.clear()
+        PREVIEW_CACHE_BYTES = 0
+    directory = preview_disk_cache_path("0" * 64)
+    if directory is not None:
+        remove_matching_files(directory.parent, "*.jpg")
+
+
+def clear_exif_cache_storage() -> None:
+    cache = load_exif_cache()
+    if is_sqlite_exif_cache(cache):
+        try:
+            with EXIF_CACHE_LOCK:
+                with sqlite3.connect(Path(str(cache["path"])), timeout=30) as connection:
+                    connection.execute("DELETE FROM exif_cache")
+                    connection.commit()
+                    connection.execute("VACUUM")
+        except sqlite3.Error:
+            pass
+    json_path = exif_cache_json_path()
+    if json_path:
+        try:
+            json_path.unlink()
+        except OSError:
+            pass
+
+
+def remove_matching_files(directory: Path, pattern: str) -> None:
+    try:
+        for path in directory.glob(pattern):
+            try:
+                if path.is_file():
+                    path.unlink()
+            except OSError:
+                continue
+    except OSError:
+        pass
+
+
 def apply_derived_layout_settings(settings: dict[str, Any]) -> None:
     ratio_width, ratio_height = parse_aspect_ratio(clean_text(settings.get("slideAspectRatio")), (16, 9))
     long_edge = clamp_int(settings.get("slideLongEdge") or settings.get("slideWidth"), 800, 8000, 1920)
@@ -3035,6 +3155,10 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.send_json(get_export_job(clean_text(payload.get("jobId"))))
             if parsed.path == "/api/export/cancel":
                 return self.send_json(request_export_cancel(clean_text(payload.get("jobId"))))
+            if parsed.path == "/api/cache/stats":
+                return self.send_json(cache_stats())
+            if parsed.path == "/api/cache/clear":
+                return self.send_json(clear_cache(clean_text(payload.get("kind"))))
             if parsed.path == "/api/banner-layout":
                 return self.send_json(self.banner_layout(payload))
             if parsed.path == "/api/preview":

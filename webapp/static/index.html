@@ -195,6 +195,27 @@
         </div>
 
         <label class="check full"><input id="shadowInput" type="checkbox" checked /> <span data-i18n="control.shadow">图片阴影</span></label>
+
+        <div class="cachePanel">
+          <div class="panelSubhead">
+            <span data-i18n="panel.cache">缓存</span>
+            <button id="refreshCacheBtn" type="button" data-i18n="button.refreshCache">刷新</button>
+          </div>
+          <div class="cacheRows">
+            <div>
+              <span data-i18n="cache.preview">预览缓存</span>
+              <b id="previewCacheText">-</b>
+            </div>
+            <div>
+              <span data-i18n="cache.exif">EXIF 缓存</span>
+              <b id="exifCacheText">-</b>
+            </div>
+          </div>
+          <div class="cacheActions">
+            <button id="clearPreviewCacheBtn" type="button" data-i18n="button.clearPreviewCache">清理预览</button>
+            <button id="clearExifCacheBtn" type="button" data-i18n="button.clearExifCache">清理 EXIF</button>
+          </div>
+        </div>
       </aside>
     </main>
 

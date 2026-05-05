@@ -108,6 +108,9 @@ const translations = {
     "button.done": "完成",
     "button.cancelExport": "取消导出",
     "button.switchLanguage": "切换语言",
+    "button.refreshCache": "刷新",
+    "button.clearPreviewCache": "清理预览",
+    "button.clearExifCache": "清理 EXIF",
     "control.recursive": "递归",
     "control.shadow": "图片阴影",
     "edit.brand": "编辑品牌文字",
@@ -116,6 +119,7 @@ const translations = {
     "edit.params": "编辑拍摄参数",
     "panel.photos": "照片",
     "panel.banner": "横幅",
+    "panel.cache": "缓存",
     "sort.dateAsc": "时间 ↑",
     "sort.dateDesc": "时间 ↓",
     "sort.nameAsc": "A-Z",
@@ -128,6 +132,8 @@ const translations = {
     "field.paramsText": "参数内容",
     "field.aspectRatio": "底片比例",
     "field.exportFormat": "导出格式",
+    "cache.preview": "预览缓存",
+    "cache.exif": "EXIF 缓存",
     "slider.bannerWidth": "横幅宽度",
     "slider.bannerHeight": "横幅高度",
     "slider.opacity": "透明度",
@@ -151,6 +157,7 @@ const translations = {
     "status.exportedPptx": "已导出 {count} 页 PPTX",
     "status.exportCanceled": "导出已取消",
     "status.exporting": "导出中",
+    "status.cacheCleared": "缓存已清理",
     "busy.processing": "处理中",
     "file.notSelected": "未选择",
     "error.requestFailed": "请求失败",
@@ -191,6 +198,9 @@ const translations = {
     "button.done": "Done",
     "button.cancelExport": "Cancel Export",
     "button.switchLanguage": "Switch Language",
+    "button.refreshCache": "Refresh",
+    "button.clearPreviewCache": "Clear Preview",
+    "button.clearExifCache": "Clear EXIF",
     "control.recursive": "Recursive",
     "control.shadow": "Image Shadow",
     "edit.brand": "Edit brand text",
@@ -199,6 +209,7 @@ const translations = {
     "edit.params": "Edit exposure parameters",
     "panel.photos": "Photos",
     "panel.banner": "Banner",
+    "panel.cache": "Cache",
     "sort.dateAsc": "Date ↑",
     "sort.dateDesc": "Date ↓",
     "sort.nameAsc": "A-Z",
@@ -211,6 +222,8 @@ const translations = {
     "field.paramsText": "Params Text",
     "field.aspectRatio": "Canvas Ratio",
     "field.exportFormat": "Export Format",
+    "cache.preview": "Preview Cache",
+    "cache.exif": "EXIF Cache",
     "slider.bannerWidth": "Banner Width",
     "slider.bannerHeight": "Banner Height",
     "slider.opacity": "Opacity",
@@ -234,6 +247,7 @@ const translations = {
     "status.exportedPptx": "Exported {count} PPTX slides",
     "status.exportCanceled": "Export canceled",
     "status.exporting": "Exporting",
+    "status.cacheCleared": "Cache cleared",
     "busy.processing": "Processing",
     "file.notSelected": "Not selected",
     "error.requestFailed": "Request failed",
@@ -294,6 +308,9 @@ function init() {
   $("cancelExportBtn").addEventListener("click", cancelExport);
   $("resetBtn").addEventListener("click", resetSettings);
   $("resetParamsTextBtn").addEventListener("click", resetParamsTextOverride);
+  $("refreshCacheBtn").addEventListener("click", loadCacheStats);
+  $("clearPreviewCacheBtn").addEventListener("click", () => clearCacheStorage("preview"));
+  $("clearExifCacheBtn").addEventListener("click", () => clearCacheStorage("exif"));
   $("selectAllBtn").addEventListener("click", selectAllPhotos);
   $("clearSelectionBtn").addEventListener("click", clearPhotoSelection);
   $("exportCompleteCloseBtn").addEventListener("click", hideExportCompleteDialog);
@@ -333,6 +350,7 @@ function init() {
   } else {
     setIdle("status.waitingScan");
   }
+  loadCacheStats();
 }
 
 function normalizeLanguage(language) {
@@ -581,6 +599,53 @@ async function api(path, payload = {}) {
     throw new Error(data.error || t("error.requestFailed"));
   }
   return data;
+}
+
+async function loadCacheStats() {
+  try {
+    const data = await api("/api/cache/stats");
+    renderCacheStats(data);
+  } catch (error) {
+    console.error(error);
+  }
+}
+
+async function clearCacheStorage(kind) {
+  try {
+    if (kind === "preview") {
+      clearPreviewImages();
+    }
+    const data = await api("/api/cache/clear", { kind });
+    renderCacheStats(data.stats || data);
+    setIdle("status.cacheCleared");
+  } catch (error) {
+    showError(error);
+  }
+}
+
+function renderCacheStats(data) {
+  const previewMemory = Number(data?.previewMemory?.bytes || 0);
+  const previewDisk = Number(data?.previewDisk?.bytes || 0);
+  const previewItems = Number(data?.previewMemory?.items || 0) + Number(data?.previewDisk?.items || 0);
+  const exifItems = Number(data?.exif?.items || 0);
+  $("previewCacheText").textContent = `${formatBytes(previewMemory + previewDisk)} / ${previewItems}`;
+  $("exifCacheText").textContent = `${formatBytes(Number(data?.exif?.bytes || 0))} / ${exifItems}`;
+}
+
+function formatBytes(bytes) {
+  const value = Number(bytes || 0);
+  if (value < 1024) {
+    return `${value} B`;
+  }
+  const units = ["KB", "MB", "GB"];
+  let amount = value / 1024;
+  for (const unit of units) {
+    if (amount < 1024 || unit === "GB") {
+      return `${amount.toFixed(amount >= 100 ? 0 : amount >= 10 ? 1 : 2)} ${unit}`;
+    }
+    amount /= 1024;
+  }
+  return `${value} B`;
 }
 
 async function loadLogoRules() {
