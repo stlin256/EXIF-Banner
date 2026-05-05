@@ -9,6 +9,7 @@ import mimetypes
 import os
 import re
 import shutil
+import sqlite3
 import subprocess
 import sys
 import importlib.util
@@ -199,6 +200,9 @@ def read_exif_batch(paths: list[Path], root: Path, recursive: bool) -> tuple[dic
 
 def cached_exif_results(paths: list[Path]) -> tuple[dict[str, dict[str, str]], list[Path], dict[str, Any]]:
     exif_cache = load_exif_cache()
+    if is_sqlite_exif_cache(exif_cache):
+        return cached_exif_results_sqlite(paths, exif_cache)
+
     entries = exif_cache.setdefault("entries", {})
     cached: dict[str, dict[str, str]] = {}
     missing: list[Path] = []
@@ -213,6 +217,10 @@ def cached_exif_results(paths: list[Path]) -> tuple[dict[str, dict[str, str]], l
 
 
 def remember_exif_results(exif_cache: dict[str, Any], results: dict[str, dict[str, str]], paths: list[Path]) -> None:
+    if is_sqlite_exif_cache(exif_cache):
+        remember_exif_results_sqlite(exif_cache, results, paths)
+        return
+
     entries = exif_cache.setdefault("entries", {})
     now = time.time()
     changed = False
@@ -245,8 +253,113 @@ def exif_cache_key_and_signature(path: Path) -> tuple[str, dict[str, Any]]:
     return key, signature
 
 
+def is_sqlite_exif_cache(exif_cache: dict[str, Any]) -> bool:
+    return exif_cache.get("backend") == "sqlite" and bool(exif_cache.get("path"))
+
+
+def cached_exif_results_sqlite(
+    paths: list[Path],
+    exif_cache: dict[str, Any],
+) -> tuple[dict[str, dict[str, str]], list[Path], dict[str, Any]]:
+    db_path = Path(str(exif_cache["path"]))
+    cached: dict[str, dict[str, str]] = {}
+    missing: list[Path] = []
+    with EXIF_CACHE_LOCK:
+        try:
+            with sqlite3.connect(db_path, timeout=30) as connection:
+                for path in paths:
+                    key, signature = exif_cache_key_and_signature(path)
+                    signature_text = exif_cache_signature_text(signature)
+                    row = connection.execute(
+                        "SELECT signature, exif FROM exif_cache WHERE key = ?",
+                        (key,),
+                    ).fetchone()
+                    if not row or row[0] != signature_text:
+                        missing.append(path)
+                        continue
+                    try:
+                        metadata = json.loads(row[1])
+                    except (TypeError, json.JSONDecodeError):
+                        missing.append(path)
+                        continue
+                    if isinstance(metadata, dict):
+                        cached[str(path.resolve())] = {str(k): clean_text(v) for k, v in metadata.items()}
+                    else:
+                        missing.append(path)
+        except sqlite3.Error:
+            return cached_exif_results_json_fallback(paths)
+    return cached, missing, exif_cache
+
+
+def cached_exif_results_json_fallback(paths: list[Path]) -> tuple[dict[str, dict[str, str]], list[Path], dict[str, Any]]:
+    exif_cache = load_json_exif_cache()
+    entries = exif_cache.setdefault("entries", {})
+    cached: dict[str, dict[str, str]] = {}
+    missing: list[Path] = []
+    for path in paths:
+        key, signature = exif_cache_key_and_signature(path)
+        entry = entries.get(key)
+        if isinstance(entry, dict) and entry.get("signature") == signature and isinstance(entry.get("exif"), dict):
+            cached[str(path.resolve())] = {str(k): clean_text(v) for k, v in entry["exif"].items()}
+        else:
+            missing.append(path)
+    return cached, missing, exif_cache
+
+
+def remember_exif_results_sqlite(
+    exif_cache: dict[str, Any],
+    results: dict[str, dict[str, str]],
+    paths: list[Path],
+) -> None:
+    if not paths:
+        return
+    db_path = Path(str(exif_cache["path"]))
+    now = time.time()
+    rows: list[tuple[str, str, str, float]] = []
+    for path in paths:
+        key, signature = exif_cache_key_and_signature(path)
+        metadata = results.get(str(path.resolve()), results.get(str(path), {}))
+        rows.append((
+            key,
+            exif_cache_signature_text(signature),
+            json.dumps(metadata, ensure_ascii=False, separators=(",", ":"), sort_keys=True),
+            now,
+        ))
+    with EXIF_CACHE_LOCK:
+        try:
+            with sqlite3.connect(db_path, timeout=30) as connection:
+                connection.executemany(
+                    """
+                    INSERT OR REPLACE INTO exif_cache (key, signature, exif, used)
+                    VALUES (?, ?, ?, ?)
+                    """,
+                    rows,
+                )
+                prune_exif_cache_sqlite(connection)
+        except sqlite3.Error:
+            fallback = load_json_exif_cache()
+            remember_exif_results(fallback, results, paths)
+
+
+def exif_cache_signature_text(signature: dict[str, Any]) -> str:
+    return json.dumps(signature, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+
+
 def load_exif_cache() -> dict[str, Any]:
-    path = exif_cache_path()
+    db_path = exif_cache_db_path()
+    if db_path is not None:
+        with EXIF_CACHE_LOCK:
+            try:
+                initialize_exif_cache_db(db_path)
+                migrate_json_exif_cache_to_sqlite(db_path)
+                return {"backend": "sqlite", "path": str(db_path)}
+            except (OSError, sqlite3.Error):
+                pass
+    return load_json_exif_cache()
+
+
+def load_json_exif_cache() -> dict[str, Any]:
+    path = exif_cache_json_path()
     if path is None:
         return {"schema": EXIF_CACHE_SCHEMA, "entries": {}}
     with EXIF_CACHE_LOCK:
@@ -260,7 +373,7 @@ def load_exif_cache() -> dict[str, Any]:
 
 
 def save_exif_cache(exif_cache: dict[str, Any]) -> None:
-    path = exif_cache_path()
+    path = exif_cache_json_path()
     if path is None:
         return
     with EXIF_CACHE_LOCK:
@@ -283,7 +396,85 @@ def save_exif_cache(exif_cache: dict[str, Any]) -> None:
             pass
 
 
-def exif_cache_path() -> Path | None:
+def initialize_exif_cache_db(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(path, timeout=30) as connection:
+        connection.execute("PRAGMA journal_mode=WAL")
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS exif_cache (
+              key TEXT PRIMARY KEY,
+              signature TEXT NOT NULL,
+              exif TEXT NOT NULL,
+              used REAL NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            "CREATE INDEX IF NOT EXISTS idx_exif_cache_used ON exif_cache (used)"
+        )
+
+
+def migrate_json_exif_cache_to_sqlite(db_path: Path) -> None:
+    json_path = exif_cache_json_path()
+    if json_path is None or not json_path.exists():
+        return
+    with sqlite3.connect(db_path, timeout=30) as connection:
+        row = connection.execute("SELECT COUNT(*) FROM exif_cache").fetchone()
+        if row and int(row[0] or 0) > 0:
+            return
+        try:
+            data = json.loads(json_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return
+        entries = data.get("entries") if isinstance(data, dict) else None
+        if not isinstance(entries, dict):
+            return
+        rows: list[tuple[str, str, str, float]] = []
+        for key, entry in entries.items():
+            if not isinstance(entry, dict) or not isinstance(entry.get("exif"), dict):
+                continue
+            signature = entry.get("signature")
+            if not isinstance(signature, dict):
+                continue
+            rows.append((
+                str(key),
+                exif_cache_signature_text(signature),
+                json.dumps(entry["exif"], ensure_ascii=False, separators=(",", ":"), sort_keys=True),
+                float(entry.get("used", 0) or 0),
+            ))
+        if rows:
+            connection.executemany(
+                """
+                INSERT OR REPLACE INTO exif_cache (key, signature, exif, used)
+                VALUES (?, ?, ?, ?)
+                """,
+                rows,
+            )
+            prune_exif_cache_sqlite(connection)
+
+
+def prune_exif_cache_sqlite(connection: sqlite3.Connection) -> None:
+    row = connection.execute("SELECT COUNT(*) FROM exif_cache").fetchone()
+    if not row or int(row[0] or 0) <= EXIF_CACHE_MAX_ENTRIES:
+        return
+    connection.execute(
+        """
+        DELETE FROM exif_cache
+        WHERE key NOT IN (
+          SELECT key FROM exif_cache ORDER BY used DESC LIMIT ?
+        )
+        """,
+        (EXIF_CACHE_MAX_ENTRIES,),
+    )
+
+
+def exif_cache_db_path() -> Path | None:
+    directory = app_cache_dir()
+    return directory / "exif-cache.sqlite3" if directory else None
+
+
+def exif_cache_json_path() -> Path | None:
     directory = app_cache_dir()
     return directory / "exif-cache.json" if directory else None
 
