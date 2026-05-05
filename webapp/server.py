@@ -269,10 +269,13 @@ def save_exif_cache(exif_cache: dict[str, Any]) -> None:
                 reverse=True,
             )
             exif_cache["entries"] = dict(ordered[:EXIF_CACHE_MAX_ENTRIES])
-        path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(exif_cache, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
-        tmp.replace(path)
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(exif_cache, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+            tmp.replace(path)
+        except OSError:
+            pass
 
 
 def exif_cache_path() -> Path | None:
