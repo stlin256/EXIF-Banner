@@ -113,6 +113,7 @@ const translations = {
     "button.refreshCache": "刷新",
     "button.clearPreviewCache": "清理预览",
     "button.clearExifCache": "清理 EXIF",
+    "button.openLocation": "打开位置",
     "control.recursive": "递归",
     "control.shadow": "图片阴影",
     "edit.brand": "编辑品牌文字",
@@ -177,6 +178,8 @@ const translations = {
     "dialog.imagesComplete": "图片导出完成",
     "dialog.pptxComplete": "PPTX 导出完成",
     "dialog.saveLocation": "保存位置",
+    "dialog.openLocation": "打开保存位置",
+    "dialog.openLocationQuestion": "是否打开保存位置？",
     "progress.prepareExport": "准备导出",
     "progress.exportComplete": "导出完成",
     "progress.exportFailed": "导出失败",
@@ -205,6 +208,7 @@ const translations = {
     "button.refreshCache": "Refresh",
     "button.clearPreviewCache": "Clear Preview",
     "button.clearExifCache": "Clear EXIF",
+    "button.openLocation": "Open Location",
     "control.recursive": "Recursive",
     "control.shadow": "Image Shadow",
     "edit.brand": "Edit brand text",
@@ -269,6 +273,8 @@ const translations = {
     "dialog.imagesComplete": "Image Export Complete",
     "dialog.pptxComplete": "PPTX Export Complete",
     "dialog.saveLocation": "Save Location",
+    "dialog.openLocation": "Open Save Location",
+    "dialog.openLocationQuestion": "Open the save location?",
     "progress.prepareExport": "Preparing export",
     "progress.exportComplete": "Export complete",
     "progress.exportFailed": "Export failed",
@@ -321,6 +327,7 @@ function init() {
   $("clearExifCacheBtn").addEventListener("click", () => clearCacheStorage("exif"));
   $("selectAllBtn").addEventListener("click", selectAllPhotos);
   $("clearSelectionBtn").addEventListener("click", clearPhotoSelection);
+  $("exportCompleteOpenBtn").addEventListener("click", openExportLocation);
   $("exportCompleteCloseBtn").addEventListener("click", hideExportCompleteDialog);
   $("exportCompleteDialog").addEventListener("click", (event) => {
     if (event.target === $("exportCompleteDialog")) {
@@ -2458,10 +2465,12 @@ function showError(error) {
 
 function showExportCompleteDialog(kind, result) {
   if (hasNativeDialogApi()) {
-    const { title, message } = exportCompleteMessage(kind, result);
-    showNativeMessage("info", title, message).then((shown) => {
+    const { title, message, targetPath } = exportCompleteMessage(kind, result);
+    showNativeMessage("info", title, message).then(async (shown) => {
       if (!shown) {
         showExportCompleteOverlay(kind, result);
+      } else {
+        await promptNativeOpenLocation(targetPath);
       }
     });
     return;
@@ -2509,11 +2518,51 @@ function renderExportCompleteDialog() {
   $("exportCompleteSummary").textContent = summary;
   $("exportCompletePath").textContent = targetPath;
   $("exportCompletePath").title = targetPath;
+  $("exportCompleteOpenBtn").hidden = !targetPath;
 }
 
 function hideExportCompleteDialog() {
   $("exportCompleteDialog").hidden = true;
   state.exportDialog = null;
+}
+
+async function openExportLocation() {
+  if (!state.exportDialog) {
+    return;
+  }
+  const { kind, result } = state.exportDialog;
+  const { targetPath } = exportCompleteMessage(kind, result);
+  if (!targetPath) {
+    return;
+  }
+  try {
+    await openPath(targetPath);
+  } catch (error) {
+    showError(error);
+  }
+}
+
+async function promptNativeOpenLocation(targetPath) {
+  if (!targetPath || !window.pywebview?.api?.confirm_open_path) {
+    return;
+  }
+  try {
+    await window.pywebview.api.confirm_open_path(
+      t("dialog.openLocation"),
+      t("dialog.openLocationQuestion"),
+      targetPath
+    );
+  } catch (error) {
+    console.error(error);
+  }
+}
+
+async function openPath(path) {
+  if (window.pywebview?.api?.open_path) {
+    await window.pywebview.api.open_path(path);
+    return;
+  }
+  await api("/api/open-path", { path });
 }
 
 function hasNativeDialogApi() {

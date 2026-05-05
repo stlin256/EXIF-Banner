@@ -1323,6 +1323,21 @@ def clear_cache(kind: str) -> dict[str, Any]:
     return {"ok": True, "stats": cache_stats()}
 
 
+def open_local_path(path_text: str) -> dict[str, Any]:
+    target = Path(clean_text(path_text)).expanduser()
+    if target.is_file():
+        target = target.parent
+    if not target.exists() or not target.is_dir():
+        raise ValueError("Open path does not exist.")
+    if os.name == "nt":
+        os.startfile(str(target))  # type: ignore[attr-defined]
+    elif sys.platform == "darwin":
+        subprocess.Popen(["open", str(target)])
+    else:
+        subprocess.Popen(["xdg-open", str(target)])
+    return {"ok": True, "path": str(target)}
+
+
 def clear_preview_cache_storage() -> None:
     global PREVIEW_CACHE_BYTES
     with PREVIEW_CACHE_LOCK:
@@ -3159,6 +3174,8 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.send_json(cache_stats())
             if parsed.path == "/api/cache/clear":
                 return self.send_json(clear_cache(clean_text(payload.get("kind"))))
+            if parsed.path == "/api/open-path":
+                return self.send_json(open_local_path(clean_text(payload.get("path"))))
             if parsed.path == "/api/banner-layout":
                 return self.send_json(self.banner_layout(payload))
             if parsed.path == "/api/preview":

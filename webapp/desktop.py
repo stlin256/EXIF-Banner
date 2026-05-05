@@ -4,6 +4,8 @@ import argparse
 import ctypes
 import locale
 import os
+import subprocess
+import sys
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 from threading import Thread
@@ -58,6 +60,16 @@ class NativeDialogs:
     def show_message(self, kind: str, title: str, message: str) -> bool:
         show_native_message(kind, title, message)
         return True
+
+    def open_path(self, path: str) -> bool:
+        open_local_path(path)
+        return True
+
+    def confirm_open_path(self, title: str, message: str, path: str) -> bool:
+        if show_native_question(title, message):
+            open_local_path(path)
+            return True
+        return False
 
 
 def parse_args() -> argparse.Namespace:
@@ -161,6 +173,41 @@ def show_native_message(kind: str, title: str, message: str) -> None:
         root.destroy()
     except Exception:
         print(f"{title_text}\n{message_text}")
+
+
+def show_native_question(title: str, message: str) -> bool:
+    title_text = clean_dialog_text(title) or APP_TITLE
+    message_text = clean_dialog_text(message)
+    if os.name == "nt":
+        flags = 0x04 | 0x20 | 0x10000 | 0x40000
+        return ctypes.windll.user32.MessageBoxW(None, message_text, title_text, flags) == 6
+
+    try:
+        import tkinter as tk
+        from tkinter import messagebox
+
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes("-topmost", True)
+        result = messagebox.askyesno(title_text, message_text, parent=root)
+        root.destroy()
+        return bool(result)
+    except Exception:
+        return False
+
+
+def open_local_path(path: str) -> None:
+    target = Path(clean_dialog_text(path)).expanduser()
+    if target.is_file():
+        target = target.parent
+    if not target.exists():
+        raise FileNotFoundError(str(target))
+    if os.name == "nt":
+        os.startfile(str(target))  # type: ignore[attr-defined]
+    elif sys.platform == "darwin":
+        subprocess.Popen(["open", str(target)])
+    else:
+        subprocess.Popen(["xdg-open", str(target)])
 
 
 def set_windows_app_user_model_id() -> None:
