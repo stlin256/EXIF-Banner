@@ -63,6 +63,8 @@ PREVIEW_CACHE_MAX_BYTES = 4 * GIB
 PREVIEW_CACHE_MIN_ITEMS = 256
 PREVIEW_CACHE_MAX_ITEMS = 4096
 PREVIEW_CACHE_ESTIMATED_ITEM_BYTES = 384 * 1024
+PREVIEW_DISK_CACHE_MIN_BYTES = 512 * MIB
+PREVIEW_DISK_CACHE_MAX_BYTES = 8 * GIB
 RESAMPLE = getattr(getattr(Image, "Resampling", Image), "LANCZOS")
 EXPORT_MAX_EDGE = 30000
 EXPORT_MAX_PIXELS = 250_000_000
@@ -863,12 +865,17 @@ def get_cached_preview(key: str) -> bytes | None:
     with PREVIEW_CACHE_LOCK:
         data = PREVIEW_CACHE.get(key)
         if data is None:
-            return None
-        PREVIEW_CACHE.move_to_end(key)
-        return data
+            data = None
+        else:
+            PREVIEW_CACHE.move_to_end(key)
+            return data
+    data = get_disk_cached_preview(key)
+    if data is not None:
+        remember_preview(key, data, persist=False)
+    return data
 
 
-def remember_preview(key: str, data: bytes) -> None:
+def remember_preview(key: str, data: bytes, persist: bool = True) -> None:
     global PREVIEW_CACHE_BYTES
     with PREVIEW_CACHE_LOCK:
         old_data = PREVIEW_CACHE.pop(key, None)
@@ -884,6 +891,8 @@ def remember_preview(key: str, data: bytes) -> None:
         ):
             _, removed = PREVIEW_CACHE.popitem(last=False)
             PREVIEW_CACHE_BYTES -= len(removed)
+    if persist:
+        remember_disk_preview(key, data)
 
 
 def preview_cache_byte_limit() -> int:
@@ -936,6 +945,75 @@ def windows_available_memory_bytes() -> int | None:
     except Exception:
         return None
     return None
+
+
+def get_disk_cached_preview(key: str) -> bytes | None:
+    path = preview_disk_cache_path(key)
+    if path is None:
+        return None
+    try:
+        data = path.read_bytes()
+        now = time.time()
+        os.utime(path, (now, now))
+        return data
+    except OSError:
+        return None
+
+
+def remember_disk_preview(key: str, data: bytes) -> None:
+    path = preview_disk_cache_path(key)
+    if path is None:
+        return
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_bytes(data)
+        tmp.replace(path)
+        prune_preview_disk_cache(path.parent)
+    except OSError:
+        pass
+
+
+def preview_disk_cache_path(key: str) -> Path | None:
+    if not re.fullmatch(r"[0-9a-f]{64}", key):
+        return None
+    directory = app_cache_dir()
+    return directory / "preview-cache" / f"{key}.jpg" if directory else None
+
+
+def prune_preview_disk_cache(directory: Path) -> None:
+    try:
+        files = [path for path in directory.glob("*.jpg") if path.is_file()]
+    except OSError:
+        return
+    total = 0
+    items: list[tuple[float, int, Path]] = []
+    for path in files:
+        try:
+            stat = path.stat()
+            total += stat.st_size
+            items.append((stat.st_mtime, stat.st_size, path))
+        except OSError:
+            continue
+    limit = preview_disk_cache_limit(directory)
+    if total <= limit:
+        return
+    for _, size, path in sorted(items, key=lambda item: item[0]):
+        try:
+            path.unlink()
+            total -= size
+        except OSError:
+            continue
+        if total <= limit:
+            return
+
+
+def preview_disk_cache_limit(directory: Path) -> int:
+    try:
+        free = shutil.disk_usage(directory).free
+        return int(max(PREVIEW_DISK_CACHE_MIN_BYTES, min(PREVIEW_DISK_CACHE_MAX_BYTES, free // 8)))
+    except OSError:
+        return PREVIEW_DISK_CACHE_MIN_BYTES
 
 
 def apply_derived_layout_settings(settings: dict[str, Any]) -> None:
