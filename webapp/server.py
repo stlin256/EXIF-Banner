@@ -1955,7 +1955,7 @@ def export_pptx(album_id: str, payload: dict[str, Any]) -> dict[str, Any]:
 
     deck_settings = export_settings_for_deck(photos, settings)
     clean_stale_pptx_temp_dirs(output_dir)
-    with tempfile.TemporaryDirectory(prefix=".exif-banner-pptx-", dir=str(output_dir)) as temp_root:
+    with tempfile.TemporaryDirectory(prefix="exif-banner-pptx-", dir=str(output_dir)) as temp_root:
         rendered_images = render_pptx_images_parallel(photos, deck_settings, temp_dir=Path(temp_root))
         write_pptx(output_file, rendered_images, int(deck_settings["slideWidth"]), int(deck_settings["slideHeight"]))
     return {"count": len(photos), "outputFile": str(output_file)}
@@ -2045,7 +2045,7 @@ def export_pptx_with_progress(
     total = max(1, len(photos) + 1)
     deck_settings = export_settings_for_deck(photos, settings)
     clean_stale_pptx_temp_dirs(output_dir)
-    with tempfile.TemporaryDirectory(prefix=".exif-banner-pptx-", dir=str(output_dir)) as temp_root:
+    with tempfile.TemporaryDirectory(prefix="exif-banner-pptx-", dir=str(output_dir)) as temp_root:
         rendered_images = render_pptx_images_parallel(
             photos,
             deck_settings,
@@ -2066,7 +2066,8 @@ def clean_stale_pptx_temp_dirs(output_dir: Path, max_age_seconds: int = 6 * 60 *
     try:
         resolved_output = output_dir.resolve()
         now = time.time()
-        for path in output_dir.glob(".exif-banner-pptx-*"):
+        candidates = list(output_dir.glob("exif-banner-pptx-*")) + list(output_dir.glob(".exif-banner-pptx-*"))
+        for path in candidates:
             try:
                 if not path.is_dir() or path.parent.resolve() != resolved_output:
                     continue
