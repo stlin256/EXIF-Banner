@@ -25,7 +25,7 @@ from datetime import datetime
 from html import escape
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from threading import Lock, Thread, Timer
+from threading import Lock, Thread, Timer, local
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 import xml.etree.ElementTree as ET
@@ -47,9 +47,14 @@ SESSIONS: dict[str, dict[str, Any]] = {}
 EXPORT_JOBS: dict[str, dict[str, Any]] = {}
 EXPORT_LOCK = Lock()
 LOGO_CACHE: dict[str, tuple[tuple[int, int], Image.Image]] = {}
+LOGO_RESIZED_CACHE: OrderedDict[str, tuple[tuple[int, int, int, int], Image.Image]] = OrderedDict()
 LOGO_CACHE_LOCK = Lock()
 LOGO_RULES_CACHE: tuple[int, list[dict[str, Any]]] | None = None
 LOGO_RULES_LOCK = Lock()
+FONT_THREAD_CACHE = local()
+FONT_CANDIDATES_CACHE: dict[tuple[bool, bool], list[Path]] = {}
+FONT_CANDIDATES_LOCK = Lock()
+FONT_THREAD_CACHE_MAX_ITEMS = 64
 EXIF_CACHE_LOCK = Lock()
 EXIF_CACHE_SCHEMA = 1
 EXIF_CACHE_MAX_ENTRIES = 50000
@@ -1704,13 +1709,9 @@ def logo_or_brand_metrics(
     brand_override: str = "",
 ) -> tuple[int, bool, int, int]:
     logo_path = render_logo_path(exif, settings)
-    logo = load_logo_image(str(logo_path) if logo_path else "")
+    logo = load_resized_logo(str(logo_path) if logo_path else "", width, height)
     if logo:
-        try:
-            scale = min(width / logo.width, height / logo.height)
-            return max(1, int(logo.width * scale)), True, 0, height
-        except Exception:
-            pass
+        return logo.width, True, 0, height
 
     brand = brand_override or clean_text(settings.get("brandText")) or infer_brand(exif)
     font_size = max(12, int(layout["slideHeight"] * float(settings["brandFontPct"]) / 100))
@@ -1802,12 +1803,9 @@ def draw_logo_or_brand(
     brand_override: str = "",
 ) -> int:
     logo_path = render_logo_path(exif, settings)
-    logo = load_logo_image(str(logo_path) if logo_path else "")
+    logo = load_resized_logo(str(logo_path) if logo_path else "", width, height)
     if logo:
         try:
-            scale = min(width / logo.width, height / logo.height)
-            logo_size = (max(1, int(logo.width * scale)), max(1, int(logo.height * scale)))
-            logo = logo.resize(logo_size, RESAMPLE)
             canvas.paste(logo, (left, top + (height - logo.height) // 2), logo)
             return logo.width
         except Exception:
@@ -1871,6 +1869,36 @@ def load_logo_image(logo_path: str) -> Image.Image | None:
             while len(LOGO_CACHE) > 8:
                 LOGO_CACHE.pop(next(iter(LOGO_CACHE)))
         return logo
+    except Exception:
+        return None
+
+
+def load_resized_logo(logo_path: str, max_width: int, max_height: int) -> Image.Image | None:
+    path_text = clean_text(logo_path)
+    if not path_text:
+        return None
+    logo = load_logo_image(path_text)
+    if not logo:
+        return None
+    try:
+        path = Path(path_text)
+        stat = path.stat()
+        scale = min(max_width / logo.width, max_height / logo.height)
+        logo_size = (max(1, int(logo.width * scale)), max(1, int(logo.height * scale)))
+        cache_key = f"{path.resolve()}:{logo_size[0]}x{logo_size[1]}"
+        signature = (stat.st_mtime_ns, stat.st_size, logo_size[0], logo_size[1])
+        with LOGO_CACHE_LOCK:
+            cached = LOGO_RESIZED_CACHE.get(cache_key)
+            if cached and cached[0] == signature:
+                LOGO_RESIZED_CACHE.move_to_end(cache_key)
+                return cached[1].copy()
+        resized = logo.resize(logo_size, RESAMPLE)
+        with LOGO_CACHE_LOCK:
+            LOGO_RESIZED_CACHE[cache_key] = (signature, resized.copy())
+            LOGO_RESIZED_CACHE.move_to_end(cache_key)
+            while len(LOGO_RESIZED_CACHE) > 48:
+                LOGO_RESIZED_CACHE.popitem(last=False)
+        return resized
     except Exception:
         return None
 
@@ -1947,16 +1975,53 @@ def format_params(exif: dict[str, str]) -> str:
 
 
 def load_font(size: int, bold: bool = False, text: str = "") -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+    size = max(1, int(size))
+    multilingual = needs_multilingual_font(text)
+    key = (size, bool(bold), multilingual)
+    cache = thread_font_cache()
+    cached = cache.get(key)
+    if cached:
+        cache.move_to_end(key)
+        return cached
     for candidate in font_candidates(bold, text):
         if candidate.exists():
             try:
-                return ImageFont.truetype(str(candidate), size)
+                font = ImageFont.truetype(str(candidate), size)
+                remember_thread_font(key, font)
+                return font
             except OSError:
                 continue
-    return ImageFont.load_default()
+    font = ImageFont.load_default()
+    remember_thread_font(key, font)
+    return font
+
+
+def thread_font_cache() -> OrderedDict[tuple[int, bool, bool], ImageFont.FreeTypeFont | ImageFont.ImageFont]:
+    cache = getattr(FONT_THREAD_CACHE, "fonts", None)
+    if cache is None:
+        cache = OrderedDict()
+        FONT_THREAD_CACHE.fonts = cache
+    return cache
+
+
+def remember_thread_font(
+    key: tuple[int, bool, bool],
+    font: ImageFont.FreeTypeFont | ImageFont.ImageFont,
+) -> None:
+    cache = thread_font_cache()
+    cache[key] = font
+    cache.move_to_end(key)
+    while len(cache) > FONT_THREAD_CACHE_MAX_ITEMS:
+        cache.popitem(last=False)
 
 
 def font_candidates(bold: bool, text: str = "") -> list[Path]:
+    multilingual_needed = needs_multilingual_font(text)
+    cache_key = (bool(bold), multilingual_needed)
+    with FONT_CANDIDATES_LOCK:
+        cached = FONT_CANDIDATES_CACHE.get(cache_key)
+        if cached is not None:
+            return cached
     font_dir = Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts"
     preferred = [
         "segoeuib.ttf" if bold else "segoeui.ttf",
@@ -1977,7 +2042,7 @@ def font_candidates(bold: bool, text: str = "") -> list[Path]:
         "malgun.ttf",
         "seguisym.ttf",
     ]
-    if needs_multilingual_font(text):
+    if multilingual_needed:
         names = multilingual + preferred
     else:
         names = preferred + multilingual
@@ -1990,6 +2055,8 @@ def font_candidates(bold: bool, text: str = "") -> list[Path]:
         if key not in seen:
             candidates.append(path)
             seen.add(key)
+    with FONT_CANDIDATES_LOCK:
+        FONT_CANDIDATES_CACHE[cache_key] = candidates
     return candidates
 
 
