@@ -1951,6 +1951,7 @@ def export_pptx(album_id: str, payload: dict[str, Any]) -> dict[str, Any]:
     output_file = Path(payload.get("outputFile") or output_dir / f"{root.name}_banner_{timestamp()}.pptx")
 
     deck_settings = export_settings_for_deck(photos, settings)
+    clean_stale_pptx_temp_dirs(output_dir)
     with tempfile.TemporaryDirectory(prefix=".exif-banner-pptx-", dir=str(output_dir)) as temp_root:
         rendered_images = render_pptx_images_parallel(photos, deck_settings, temp_dir=Path(temp_root))
         write_pptx(output_file, rendered_images, int(deck_settings["slideWidth"]), int(deck_settings["slideHeight"]))
@@ -2040,6 +2041,7 @@ def export_pptx_with_progress(
     output_file = unique_path(output_dir / f"{root.name}_banner_{timestamp()}.pptx")
     total = max(1, len(photos) + 1)
     deck_settings = export_settings_for_deck(photos, settings)
+    clean_stale_pptx_temp_dirs(output_dir)
     with tempfile.TemporaryDirectory(prefix=".exif-banner-pptx-", dir=str(output_dir)) as temp_root:
         rendered_images = render_pptx_images_parallel(
             photos,
@@ -2055,6 +2057,23 @@ def export_pptx_with_progress(
         write_pptx(output_file, rendered_images, int(deck_settings["slideWidth"]), int(deck_settings["slideHeight"]))
     update_export_job(job_id, done=total, total=total, progress=1, message="写入 PPTX")
     return {"count": len(photos), "outputFile": str(output_file)}
+
+
+def clean_stale_pptx_temp_dirs(output_dir: Path, max_age_seconds: int = 6 * 60 * 60) -> None:
+    try:
+        resolved_output = output_dir.resolve()
+        now = time.time()
+        for path in output_dir.glob(".exif-banner-pptx-*"):
+            try:
+                if not path.is_dir() or path.parent.resolve() != resolved_output:
+                    continue
+                age = now - path.stat().st_mtime
+                if age >= max_age_seconds:
+                    shutil.rmtree(path, ignore_errors=True)
+            except OSError:
+                continue
+    except OSError:
+        return
 
 
 def export_photo_images_parallel(
