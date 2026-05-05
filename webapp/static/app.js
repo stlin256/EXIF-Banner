@@ -37,6 +37,10 @@ const state = {
   bannerUndoStack: [],
   bannerUndoLimit: 80,
   photoItems: new Map(),
+  photoVirtualCanvas: null,
+  photoListFrame: 0,
+  photoVisibleStart: 0,
+  photoVisibleEnd: 0,
   thumbObserver: null,
   activePhotoItem: null,
   saveTimer: 0,
@@ -255,6 +259,9 @@ const sortIconNames = {
   nameDesc: "arrow-down-z-a",
 };
 
+const PHOTO_ROW_HEIGHT = 70;
+const PHOTO_LIST_OVERSCAN = 8;
+
 const $ = (id) => document.getElementById(id);
 
 function init() {
@@ -286,6 +293,7 @@ function init() {
       hideExportCompleteDialog();
     }
   });
+  $("photoList").addEventListener("scroll", scheduleVirtualPhotoListRender, { passive: true });
   setupBannerEditing();
   $("previewStage").addEventListener("wheel", handlePreviewWheel, { passive: false });
   document.addEventListener("keydown", handleKeyNavigation);
@@ -702,57 +710,112 @@ function photoFingerprint(photos) {
 function renderPhotoList() {
   const list = $("photoList");
   list.textContent = "";
+  list.scrollTop = 0;
   state.photoItems = new Map();
   state.activePhotoItem = null;
+  state.photoVisibleStart = 0;
+  state.photoVisibleEnd = 0;
   resetThumbObserver();
   state.thumbObserver = createThumbObserver(list);
+  const canvas = document.createElement("div");
+  canvas.className = "photoVirtualCanvas";
+  canvas.style.height = `${state.photos.length * PHOTO_ROW_HEIGHT}px`;
+  list.append(canvas);
+  state.photoVirtualCanvas = canvas;
+  renderVirtualPhotoList();
+}
+
+function scheduleVirtualPhotoListRender() {
+  if (state.photoListFrame) {
+    return;
+  }
+  state.photoListFrame = window.requestAnimationFrame(() => {
+    state.photoListFrame = 0;
+    renderVirtualPhotoList();
+  });
+}
+
+function renderVirtualPhotoList() {
+  const list = $("photoList");
+  const canvas = state.photoVirtualCanvas;
+  if (!canvas) {
+    return;
+  }
+  const total = state.photos.length;
+  const viewportRows = Math.ceil(list.clientHeight / PHOTO_ROW_HEIGHT);
+  const start = Math.max(0, Math.floor(list.scrollTop / PHOTO_ROW_HEIGHT) - PHOTO_LIST_OVERSCAN);
+  const end = Math.min(total, start + viewportRows + PHOTO_LIST_OVERSCAN * 2 + 1);
+  if (start === state.photoVisibleStart && end === state.photoVisibleEnd && state.photoItems.size) {
+    updateActivePhotoItem(state.current);
+    syncSelectionControls();
+    return;
+  }
+
+  resetThumbObserver();
+  state.thumbObserver = createThumbObserver(list);
+  state.photoItems = new Map();
+  state.activePhotoItem = null;
+  canvas.textContent = "";
+  state.photoVisibleStart = start;
+  state.photoVisibleEnd = end;
   const fragment = document.createDocumentFragment();
-  for (const photo of state.photos) {
-    const item = document.createElement("div");
-    item.className = "photoItem";
-    item.dataset.index = photo.index;
-    item.classList.toggle("selected", state.selected.has(photo.index));
-
-    const checkbox = document.createElement("input");
-    checkbox.className = "photoSelect";
-    checkbox.type = "checkbox";
-    checkbox.checked = state.selected.has(photo.index);
-    checkbox.addEventListener("change", () => {
-      if (checkbox.checked) {
-        state.selected.add(photo.index);
-      } else {
-        state.selected.delete(photo.index);
-      }
-      item.classList.toggle("selected", checkbox.checked);
-      updateSelectionUI();
-      scheduleSaveState();
-    });
-
-    const image = document.createElement("img");
-    image.className = "photoThumb";
-    image.loading = "lazy";
-    image.decoding = "async";
-    image.alt = "";
-    image.dataset.src = thumbUrl(photo.index);
-    image.addEventListener("click", () => selectPhoto(photo.index));
-    queueThumbImage(image);
-
-    const text = document.createElement("div");
-    text.className = "photoText";
-    text.addEventListener("click", () => selectPhoto(photo.index));
-    const name = document.createElement("div");
-    name.className = "photoName";
-    name.textContent = photo.name;
-    name.title = photo.name;
-    const meta = document.createElement("div");
-    meta.className = "photoMeta";
-    meta.textContent = `${photo.width} x ${photo.height}`;
-    text.append(name, meta);
-    item.append(checkbox, image, text);
+  for (let index = start; index < end; index += 1) {
+    const photo = state.photos[index];
+    if (!photo) {
+      continue;
+    }
+    const item = createPhotoItem(photo);
+    item.style.top = `${index * PHOTO_ROW_HEIGHT}px`;
     fragment.append(item);
     state.photoItems.set(photo.index, item);
   }
-  list.append(fragment);
+  canvas.append(fragment);
+  updateActivePhotoItem(state.current);
+}
+
+function createPhotoItem(photo) {
+  const item = document.createElement("div");
+  item.className = "photoItem";
+  item.dataset.index = photo.index;
+  item.classList.toggle("selected", state.selected.has(photo.index));
+
+  const checkbox = document.createElement("input");
+  checkbox.className = "photoSelect";
+  checkbox.type = "checkbox";
+  checkbox.checked = state.selected.has(photo.index);
+  checkbox.addEventListener("change", () => {
+    if (checkbox.checked) {
+      state.selected.add(photo.index);
+    } else {
+      state.selected.delete(photo.index);
+    }
+    item.classList.toggle("selected", checkbox.checked);
+    updateSelectionUI();
+    scheduleSaveState();
+  });
+
+  const image = document.createElement("img");
+  image.className = "photoThumb";
+  image.loading = "lazy";
+  image.decoding = "async";
+  image.alt = "";
+  image.dataset.src = thumbUrl(photo.index);
+  image.addEventListener("click", () => selectPhoto(photo.index));
+  queueThumbImage(image);
+
+  const text = document.createElement("div");
+  text.className = "photoText";
+  text.addEventListener("click", () => selectPhoto(photo.index));
+  const name = document.createElement("div");
+  name.className = "photoName";
+  name.textContent = photo.name;
+  name.title = photo.name;
+  const meta = document.createElement("div");
+  meta.className = "photoMeta";
+  meta.textContent = `${photo.width} x ${photo.height}`;
+  text.append(name, meta);
+  item.append(checkbox, image, text);
+  return item;
 }
 
 function thumbUrl(index) {
@@ -853,10 +916,15 @@ function scrollActivePhotoIntoView() {
   const index = state.current;
   state.scrollFrame = window.requestAnimationFrame(() => {
     state.scrollFrame = 0;
-    const active = state.photoItems.get(index);
-    if (active) {
-      active.scrollIntoView({ block: "nearest" });
+    const list = $("photoList");
+    const top = index * PHOTO_ROW_HEIGHT;
+    const bottom = top + PHOTO_ROW_HEIGHT;
+    if (top < list.scrollTop) {
+      list.scrollTop = top;
+    } else if (bottom > list.scrollTop + list.clientHeight) {
+      list.scrollTop = bottom - list.clientHeight;
     }
+    renderVirtualPhotoList();
   });
 }
 
@@ -2282,5 +2350,8 @@ function setProgress(progress) {
   text.textContent = `${percent}%`;
 }
 
-window.addEventListener("resize", updatePreview);
+window.addEventListener("resize", () => {
+  updatePreview();
+  scheduleVirtualPhotoListRender();
+});
 init();

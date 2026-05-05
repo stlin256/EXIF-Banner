@@ -330,10 +330,20 @@ input[type="color"] {
   height: calc(100% - 42px);
   overflow: auto;
   padding: 8px;
+  position: relative;
   overscroll-behavior: contain;
 }
 
+.photoVirtualCanvas {
+  min-height: 100%;
+  position: relative;
+  width: 100%;
+}
+
 .photoItem {
+  left: 0;
+  position: absolute;
+  right: 0;
   width: 100%;
   display: grid;
   grid-template-columns: 22px 54px 1fr;
