@@ -76,6 +76,11 @@ PREVIEW_DISK_CACHE_MAX_BYTES = 8 * GIB
 PREVIEW_DISK_PRUNE_INTERVAL_SECONDS = 60
 PREVIEW_DISK_PRUNE_WRITE_INTERVAL = 64
 PREVIEW_CACHE_IGNORED_SETTINGS = {"bannerTextOverrides", "exportFormat", "exportScalePct", "quality"}
+EXIF_TAG_IMAGE_WIDTH = 256
+EXIF_TAG_IMAGE_HEIGHT = 257
+EXIF_TAG_ORIENTATION = 274
+EXIF_TAG_PIXEL_X_DIMENSION = 40962
+EXIF_TAG_PIXEL_Y_DIMENSION = 40963
 RESAMPLE = getattr(getattr(Image, "Resampling", Image), "LANCZOS")
 EXPORT_MAX_EDGE = 30000
 EXPORT_MAX_PIXELS = 250_000_000
@@ -2663,7 +2668,7 @@ def export_queue_limit(workers: int, total: int) -> int:
 def render_and_save_export_photo(photo: dict[str, Any], target: Path, settings: dict[str, Any]) -> str:
     render_settings = settings if settings.get("_fixedSlideSize") else export_settings_for_photo(photo, settings)
     image = render_composite(photo, render_settings)
-    save_export_image(image, target, render_settings)
+    save_export_image(image, target, render_settings, photo)
     return str(target)
 
 
@@ -2741,24 +2746,78 @@ def unique_path_reserved(path: Path, reserved: set[str]) -> Path:
     return candidate
 
 
-def save_png(image: Image.Image, target: Path) -> None:
+def save_png(image: Image.Image, target: Path, exif_bytes: bytes | None = None) -> None:
     if image.mode not in {"RGB", "RGBA"}:
         image = image.convert("RGB")
-    image.save(target, "PNG", compress_level=4)
+    options: dict[str, Any] = {"compress_level": 4}
+    if exif_bytes:
+        options["exif"] = exif_bytes
+    save_with_optional_exif(image, target, "PNG", options, bool(exif_bytes))
 
 
-def save_export_image(image: Image.Image, target: Path, settings: dict[str, Any]) -> None:
+def save_export_image(
+    image: Image.Image,
+    target: Path,
+    settings: dict[str, Any],
+    photo: dict[str, Any] | None = None,
+) -> None:
     target.parent.mkdir(parents=True, exist_ok=True)
+    exif_bytes = export_exif_bytes(photo, image.size) if photo else None
     if export_format(settings) == "png":
-        save_png(image, target)
+        save_png(image, target, exif_bytes)
     else:
-        save_jpeg(image, target, settings)
+        save_jpeg(image, target, settings, exif_bytes)
 
 
-def save_jpeg(image: Image.Image, target: Path, settings: dict[str, Any]) -> None:
+def save_jpeg(
+    image: Image.Image,
+    target: Path,
+    settings: dict[str, Any],
+    exif_bytes: bytes | None = None,
+) -> None:
     if image.mode != "RGB":
         image = image.convert("RGB")
-    image.save(target, "JPEG", **jpeg_save_options(settings))
+    options = jpeg_save_options(settings)
+    if exif_bytes:
+        options["exif"] = exif_bytes
+    save_with_optional_exif(image, target, "JPEG", options, bool(exif_bytes))
+
+
+def save_with_optional_exif(
+    image: Image.Image,
+    target: Path,
+    format_name: str,
+    options: dict[str, Any],
+    has_exif: bool,
+) -> None:
+    try:
+        image.save(target, format_name, **options)
+    except (OSError, ValueError):
+        if not has_exif:
+            raise
+        retry_options = dict(options)
+        retry_options.pop("exif", None)
+        image.save(target, format_name, **retry_options)
+
+
+def export_exif_bytes(photo: dict[str, Any] | None, output_size: tuple[int, int]) -> bytes | None:
+    path_text = clean_text(photo.get("path") if photo else "")
+    if not path_text:
+        return None
+    try:
+        with Image.open(path_text) as source:
+            exif = source.getexif()
+            if not exif:
+                return None
+            width, height = max(1, int(output_size[0])), max(1, int(output_size[1]))
+            exif[EXIF_TAG_ORIENTATION] = 1
+            exif[EXIF_TAG_IMAGE_WIDTH] = width
+            exif[EXIF_TAG_IMAGE_HEIGHT] = height
+            exif[EXIF_TAG_PIXEL_X_DIMENSION] = width
+            exif[EXIF_TAG_PIXEL_Y_DIMENSION] = height
+            return exif.tobytes()
+    except Exception:
+        return None
 
 
 def save_pptx_image(image: Image.Image, target: Path, settings: dict[str, Any]) -> None:

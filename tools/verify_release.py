@@ -63,7 +63,12 @@ def prepare_album(output_dir: Path, album: str | None) -> Path:
     colors = [(180, 72, 72), (72, 132, 180), (96, 150, 92)]
     for index, color in enumerate(colors, start=1):
         image = Image.new("RGB", (1800, 1200), color)
-        image.save(album_dir / f"sample_{index:02d}.jpg", "JPEG", quality=90)
+        exif = Image.Exif()
+        exif[271] = "EXIF-Banner Verify"
+        exif[272] = f"Verify Camera {index}"
+        exif[305] = "EXIF-Banner"
+        exif[306] = "2026:05:05 12:00:00"
+        image.save(album_dir / f"sample_{index:02d}.jpg", "JPEG", quality=90, exif=exif)
     return album_dir
 
 
@@ -93,6 +98,21 @@ def verify_app_paths(album_dir: Path, output_dir: Path) -> dict[str, object]:
     )
     if image_result["count"] != 2:
         raise RuntimeError("Image export count mismatch.")
+    verify_exported_exif(Path(image_result["files"][0]), "Verify Camera 1")
+
+    png_settings = dict(settings)
+    png_settings["exportFormat"] = "png"
+    png_result = server.export_images(
+        album_payload["albumId"],
+        {
+            "settings": png_settings,
+            "selection": [0],
+            "outputDir": str(output_dir / "png-images"),
+        },
+    )
+    if png_result["count"] != 1:
+        raise RuntimeError("PNG export count mismatch.")
+    verify_exported_exif(Path(png_result["files"][0]), "Verify Camera 1")
 
     pptx_path = output_dir / "pptx" / "release-check.pptx"
     pptx_result = server.export_pptx(
@@ -116,9 +136,21 @@ def verify_app_paths(album_dir: Path, output_dir: Path) -> dict[str, object]:
         "albumCount": len(photos),
         "preview": str(preview_path),
         "imageExportCount": image_result["count"],
+        "pngExportCount": png_result["count"],
         "pptx": pptx_result["outputFile"],
         "pptxSlides": slide_count,
     }
+
+
+def verify_exported_exif(path: Path, expected_model: str) -> None:
+    with Image.open(path) as image:
+        exif = image.getexif()
+        if not exif:
+            raise RuntimeError("Exported image EXIF is missing.")
+        if exif.get(272) != expected_model:
+            raise RuntimeError(f"Exported image EXIF model mismatch: {exif.get(272)!r}")
+        if exif.get(274, 1) != 1:
+            raise RuntimeError("Exported image EXIF orientation should be normalized to 1.")
 
 
 def main() -> None:

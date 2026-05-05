@@ -47,6 +47,7 @@ Example images:
 - Supports smooth page navigation with mouse wheel, keyboard shortcuts, background preview pre-rendering, and preview caching.
 - Uses a cleaner loading animation and export progress indicator.
 - Exports JPEG / PNG composite images.
+- Exported JPEG / PNG images preserve the source EXIF metadata when possible, while normalizing output orientation and dimensions.
 - Exports at a resolution percentage based on the original photo pixels; `100%` keeps the photo area at source resolution.
 - Preserves source folder structure when exporting recursive albums.
 - Exports PPTX files with one composite image per slide.
