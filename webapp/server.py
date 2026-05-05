@@ -19,7 +19,7 @@ import uuid
 import webbrowser
 import zipfile
 from collections import OrderedDict
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from datetime import datetime
 from html import escape
@@ -2327,26 +2327,48 @@ def export_photo_images_parallel(
     ordered: list[str | None] = [None] * len(photos)
     completed = 0
     with ThreadPoolExecutor(max_workers=workers) as executor:
-        future_map = {
-            executor.submit(render_and_save_export_photo, photo, target, settings): index
-            for index, (photo, target) in enumerate(zip(photos, targets))
-        }
-        for future in as_completed(future_map):
+        next_index = 0
+        future_map: dict[Any, int] = {}
+        queue_limit = export_queue_limit(workers, len(photos))
+
+        def submit_available() -> None:
+            nonlocal next_index
+            while next_index < len(photos) and len(future_map) < queue_limit:
+                index = next_index
+                future_map[executor.submit(
+                    render_and_save_export_photo,
+                    photos[index],
+                    targets[index],
+                    settings,
+                )] = index
+                next_index += 1
+
+        submit_available()
+        while future_map:
             if export_cancel_requested(job_id):
                 cancel_pending_futures(future_map)
                 raise ExportCancelled()
-            index = future_map[future]
-            ordered[index] = future.result()
-            completed += 1
-            if job_id:
-                update_export_job(
-                    job_id,
-                    done=completed,
-                    total=total_units,
-                    progress=completed / total_units,
-                    message=f"{message_prefix} {completed}/{display_total}",
-                )
-            ensure_export_not_cancelled(job_id)
+            done, _ = wait(future_map, timeout=0.2, return_when=FIRST_COMPLETED)
+            if not done:
+                continue
+            for future in done:
+                index = future_map.pop(future)
+                try:
+                    ordered[index] = future.result()
+                except Exception:
+                    cancel_pending_futures(future_map)
+                    raise
+                completed += 1
+                if job_id:
+                    update_export_job(
+                        job_id,
+                        done=completed,
+                        total=total_units,
+                        progress=completed / total_units,
+                        message=f"{message_prefix} {completed}/{display_total}",
+                    )
+                ensure_export_not_cancelled(job_id)
+            submit_available()
 
     return [path for path in ordered if path is not None]
 
@@ -2381,32 +2403,48 @@ def render_pptx_images_parallel(
     if temp_dir is not None:
         temp_dir.mkdir(parents=True, exist_ok=True)
     with ThreadPoolExecutor(max_workers=workers) as executor:
-        if temp_dir is None:
-            future_map = {
-                executor.submit(render_export_photo_bytes, photo, settings): index
-                for index, photo in enumerate(photos)
-            }
-        else:
-            future_map = {
-                executor.submit(render_export_photo_file, photo, temp_dir / f"slide_{index + 1:05d}.{image_ext}", settings): index
-                for index, photo in enumerate(photos)
-            }
-        for future in as_completed(future_map):
+        next_index = 0
+        future_map: dict[Any, int] = {}
+        queue_limit = export_queue_limit(workers, len(photos))
+
+        def submit_available() -> None:
+            nonlocal next_index
+            while next_index < len(photos) and len(future_map) < queue_limit:
+                index = next_index
+                if temp_dir is None:
+                    future = executor.submit(render_export_photo_bytes, photos[index], settings)
+                else:
+                    target = temp_dir / f"slide_{index + 1:05d}.{image_ext}"
+                    future = executor.submit(render_export_photo_file, photos[index], target, settings)
+                future_map[future] = index
+                next_index += 1
+
+        submit_available()
+        while future_map:
             if export_cancel_requested(job_id):
                 cancel_pending_futures(future_map)
                 raise ExportCancelled()
-            index = future_map[future]
-            ordered[index] = future.result()
-            completed += 1
-            if job_id:
-                update_export_job(
-                    job_id,
-                    done=completed,
-                    total=total_units,
-                    progress=completed / total_units,
-                    message=f"{message_prefix} {completed}/{display_total}",
-                )
-            ensure_export_not_cancelled(job_id)
+            done, _ = wait(future_map, timeout=0.2, return_when=FIRST_COMPLETED)
+            if not done:
+                continue
+            for future in done:
+                index = future_map.pop(future)
+                try:
+                    ordered[index] = future.result()
+                except Exception:
+                    cancel_pending_futures(future_map)
+                    raise
+                completed += 1
+                if job_id:
+                    update_export_job(
+                        job_id,
+                        done=completed,
+                        total=total_units,
+                        progress=completed / total_units,
+                        message=f"{message_prefix} {completed}/{display_total}",
+                    )
+                ensure_export_not_cancelled(job_id)
+            submit_available()
 
     return [item for item in ordered if item is not None]
 
@@ -2414,6 +2452,10 @@ def render_pptx_images_parallel(
 def cancel_pending_futures(future_map: dict[Any, int]) -> None:
     for future in future_map:
         future.cancel()
+
+
+def export_queue_limit(workers: int, total: int) -> int:
+    return max(1, min(total, workers * 2))
 
 
 def render_and_save_export_photo(photo: dict[str, Any], target: Path, settings: dict[str, Any]) -> str:
