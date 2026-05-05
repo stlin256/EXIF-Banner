@@ -55,6 +55,8 @@ EXIF_CACHE_MAX_ENTRIES = 50000
 PREVIEW_CACHE: OrderedDict[str, bytes] = OrderedDict()
 PREVIEW_CACHE_LOCK = Lock()
 PREVIEW_CACHE_BYTES = 0
+PREVIEW_DISK_PRUNE_LOCK = Lock()
+PREVIEW_DISK_PRUNE_STATE = {"last": 0.0, "writes": 0}
 MIB = 1024 * 1024
 GIB = 1024 * MIB
 PREVIEW_CACHE_DEFAULT_BYTES = 1024 * MIB
@@ -65,6 +67,8 @@ PREVIEW_CACHE_MAX_ITEMS = 4096
 PREVIEW_CACHE_ESTIMATED_ITEM_BYTES = 384 * 1024
 PREVIEW_DISK_CACHE_MIN_BYTES = 512 * MIB
 PREVIEW_DISK_CACHE_MAX_BYTES = 8 * GIB
+PREVIEW_DISK_PRUNE_INTERVAL_SECONDS = 60
+PREVIEW_DISK_PRUNE_WRITE_INTERVAL = 64
 PREVIEW_CACHE_IGNORED_SETTINGS = {"bannerTextOverrides", "exportFormat", "exportScalePct", "quality"}
 RESAMPLE = getattr(getattr(Image, "Resampling", Image), "LANCZOS")
 EXPORT_MAX_EDGE = 30000
@@ -983,9 +987,23 @@ def remember_disk_preview(key: str, data: bytes) -> None:
         tmp = path.with_suffix(".tmp")
         tmp.write_bytes(data)
         tmp.replace(path)
-        prune_preview_disk_cache(path.parent)
+        if should_prune_preview_disk_cache():
+            prune_preview_disk_cache(path.parent)
     except OSError:
         pass
+
+
+def should_prune_preview_disk_cache() -> bool:
+    now = time.monotonic()
+    with PREVIEW_DISK_PRUNE_LOCK:
+        PREVIEW_DISK_PRUNE_STATE["writes"] = int(PREVIEW_DISK_PRUNE_STATE.get("writes", 0)) + 1
+        last = float(PREVIEW_DISK_PRUNE_STATE.get("last", 0))
+        writes = int(PREVIEW_DISK_PRUNE_STATE["writes"])
+        if writes < PREVIEW_DISK_PRUNE_WRITE_INTERVAL and now - last < PREVIEW_DISK_PRUNE_INTERVAL_SECONDS:
+            return False
+        PREVIEW_DISK_PRUNE_STATE["writes"] = 0
+        PREVIEW_DISK_PRUNE_STATE["last"] = now
+        return True
 
 
 def preview_disk_cache_path(key: str) -> Path | None:
