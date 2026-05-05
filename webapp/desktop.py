@@ -20,9 +20,9 @@ except ImportError as exc:
     ) from exc
 
 try:
-    from server import Handler, rendered_photo_clipboard_dib
+    from server import Handler, rendered_photo_clipboard_dib, start_cache_maintenance
 except ModuleNotFoundError:
-    from .server import Handler, rendered_photo_clipboard_dib
+    from .server import Handler, rendered_photo_clipboard_dib, start_cache_maintenance
 
 
 APP_TITLE = "EXIF-Banner"
@@ -99,6 +99,7 @@ def start_local_server(host: str, port: int) -> tuple[ThreadingHTTPServer, Threa
     server = ThreadingHTTPServer((host, port), Handler)
     actual_host, actual_port = server.server_address[:2]
     url = f"http://{actual_host}:{actual_port}/"
+    start_cache_maintenance()
     thread = Thread(target=server.serve_forever, name="EXIF-Banner HTTP", daemon=True)
     thread.start()
     return server, thread, url

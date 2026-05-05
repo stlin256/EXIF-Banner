@@ -226,26 +226,6 @@ input[type="color"] {
   background: #fbfaf7;
 }
 
-.panelSubhead {
-  height: 34px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.panelSubhead span {
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.panelSubhead button {
-  height: 28px;
-  padding: 0 10px;
-  font-size: 12px;
-}
-
 .photoHead > div:first-child {
   display: flex;
   align-items: center;
@@ -648,45 +628,6 @@ input[type="color"] {
 .field.pickerRow {
   grid-template-columns: 1fr;
   align-items: stretch;
-}
-
-.cachePanel {
-  margin: 16px 14px 0;
-  border-top: 1px solid var(--line);
-  padding-top: 10px;
-}
-
-.cacheRows {
-  display: grid;
-  gap: 6px;
-}
-
-.cacheRows div {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  min-width: 0;
-}
-
-.cacheRows b {
-  color: var(--text);
-  font-size: 12px;
-  font-weight: 600;
-  white-space: nowrap;
-}
-
-.cacheActions {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
-  margin-top: 10px;
-}
-
-.cacheActions button {
-  height: 30px;
-  padding: 0 8px;
-  font-size: 12px;
 }
 
 .field.actionRow button {

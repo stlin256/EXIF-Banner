@@ -63,19 +63,35 @@ PREVIEW_CACHE_LOCK = Lock()
 PREVIEW_CACHE_BYTES = 0
 PREVIEW_DISK_PRUNE_LOCK = Lock()
 PREVIEW_DISK_PRUNE_STATE = {"last": 0.0, "writes": 0}
+CACHE_MAINTENANCE_LOCK = Lock()
+CACHE_MAINTENANCE_STATE = {"started": False}
 MIB = 1024 * 1024
 GIB = 1024 * MIB
+DAY_SECONDS = 24 * 60 * 60
 PREVIEW_CACHE_DEFAULT_BYTES = 1024 * MIB
 PREVIEW_CACHE_MIN_BYTES = 64 * MIB
 PREVIEW_CACHE_MAX_BYTES = 4 * GIB
 PREVIEW_CACHE_MIN_ITEMS = 256
 PREVIEW_CACHE_MAX_ITEMS = 4096
 PREVIEW_CACHE_ESTIMATED_ITEM_BYTES = 384 * 1024
-PREVIEW_DISK_CACHE_MIN_BYTES = 512 * MIB
-PREVIEW_DISK_CACHE_MAX_BYTES = 8 * GIB
-PREVIEW_DISK_PRUNE_INTERVAL_SECONDS = 60
+PREVIEW_DISK_CACHE_TIGHT_BYTES = 512 * MIB
+PREVIEW_DISK_CACHE_NORMAL_BYTES = 2 * GIB
+PREVIEW_DISK_CACHE_ABUNDANT_BYTES = 8 * GIB
+PREVIEW_DISK_PRUNE_INTERVAL_SECONDS = 30 * 60
 PREVIEW_DISK_PRUNE_WRITE_INTERVAL = 64
 PREVIEW_CACHE_IGNORED_SETTINGS = {"bannerTextOverrides", "exportFormat", "exportScalePct", "quality"}
+PREVIEW_CACHE_CURRENT_PROJECT_MAX_AGE_SECONDS = 14 * DAY_SECONDS
+PREVIEW_CACHE_NONCURRENT_MAX_AGE_SECONDS = 5 * DAY_SECONDS
+PREVIEW_CACHE_ABUNDANT_NONCURRENT_MAX_AGE_SECONDS = 7 * DAY_SECONDS
+PREVIEW_CACHE_TIGHT_CURRENT_MAX_AGE_SECONDS = 3 * DAY_SECONDS
+PREVIEW_CACHE_TIGHT_NONCURRENT_MAX_AGE_SECONDS = DAY_SECONDS
+EXIF_CACHE_NORMAL_MAX_AGE_SECONDS = 120 * DAY_SECONDS
+EXIF_CACHE_ABUNDANT_MAX_AGE_SECONDS = 180 * DAY_SECONDS
+EXIF_CACHE_TIGHT_MAX_AGE_SECONDS = 60 * DAY_SECONDS
+EXIF_CACHE_TIGHT_MAX_ENTRIES = 30000
+EXIF_CACHE_ABUNDANT_MAX_ENTRIES = 100000
+CACHE_MAINTENANCE_START_DELAY_SECONDS = 12
+CACHE_MAINTENANCE_INTERVAL_SECONDS = 30 * 60
 EXIF_TAG_IMAGE_WIDTH = 256
 EXIF_TAG_IMAGE_HEIGHT = 257
 EXIF_TAG_ORIENTATION = 274
@@ -113,6 +129,16 @@ class Photo:
     width: int
     height: int
     exif: dict[str, str]
+
+
+@dataclass(frozen=True)
+class CachePolicy:
+    pressure: str
+    preview_bytes: int
+    current_preview_age: int
+    noncurrent_preview_age: int
+    exif_entries: int
+    exif_age: int
 
 
 class ExportCancelled(RuntimeError):
@@ -216,13 +242,19 @@ def cached_exif_results(paths: list[Path]) -> tuple[dict[str, dict[str, str]], l
     entries = exif_cache.setdefault("entries", {})
     cached: dict[str, dict[str, str]] = {}
     missing: list[Path] = []
+    touched = False
+    now = time.time()
     for path in paths:
         key, signature = exif_cache_key_and_signature(path)
         entry = entries.get(key)
         if isinstance(entry, dict) and entry.get("signature") == signature and isinstance(entry.get("exif"), dict):
             cached[str(path.resolve())] = {str(k): clean_text(v) for k, v in entry["exif"].items()}
+            entry["used"] = now
+            touched = True
         else:
             missing.append(path)
+    if touched:
+        save_exif_cache(exif_cache)
     return cached, missing, exif_cache
 
 
@@ -274,6 +306,7 @@ def cached_exif_results_sqlite(
     db_path = Path(str(exif_cache["path"]))
     cached: dict[str, dict[str, str]] = {}
     missing: list[Path] = []
+    hit_keys: list[str] = []
     with EXIF_CACHE_LOCK:
         try:
             with sqlite3.connect(db_path, timeout=30) as connection:
@@ -294,8 +327,15 @@ def cached_exif_results_sqlite(
                         continue
                     if isinstance(metadata, dict):
                         cached[str(path.resolve())] = {str(k): clean_text(v) for k, v in metadata.items()}
+                        hit_keys.append(key)
                     else:
                         missing.append(path)
+                if hit_keys:
+                    now = time.time()
+                    connection.executemany(
+                        "UPDATE exif_cache SET used = ? WHERE key = ?",
+                        [(now, key) for key in hit_keys],
+                    )
         except sqlite3.Error:
             return cached_exif_results_json_fallback(paths)
     return cached, missing, exif_cache
@@ -390,13 +430,21 @@ def save_exif_cache(exif_cache: dict[str, Any]) -> None:
         entries = exif_cache.get("entries")
         if not isinstance(entries, dict):
             return
-        if len(entries) > EXIF_CACHE_MAX_ENTRIES:
+        active_policy = cache_policy(path.parent)
+        cutoff = time.time() - active_policy.exif_age
+        entries = {
+            key: entry
+            for key, entry in entries.items()
+            if not isinstance(entry, dict) or float(entry.get("used", 0) or 0) >= cutoff
+        }
+        exif_cache["entries"] = entries
+        if len(entries) > active_policy.exif_entries:
             ordered = sorted(
                 entries.items(),
                 key=lambda item: float(item[1].get("used", 0)) if isinstance(item[1], dict) else 0,
                 reverse=True,
             )
-            exif_cache["entries"] = dict(ordered[:EXIF_CACHE_MAX_ENTRIES])
+            exif_cache["entries"] = dict(ordered[:active_policy.exif_entries])
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
             tmp = path.with_suffix(".tmp")
@@ -464,9 +512,13 @@ def migrate_json_exif_cache_to_sqlite(db_path: Path) -> None:
             prune_exif_cache_sqlite(connection)
 
 
-def prune_exif_cache_sqlite(connection: sqlite3.Connection) -> None:
+def prune_exif_cache_sqlite(connection: sqlite3.Connection, policy: CachePolicy | None = None) -> None:
+    active_policy = policy or cache_policy(app_cache_dir())
+    cutoff = time.time() - active_policy.exif_age
+    connection.execute("DELETE FROM exif_cache WHERE used < ?", (cutoff,))
     row = connection.execute("SELECT COUNT(*) FROM exif_cache").fetchone()
-    if not row or int(row[0] or 0) <= EXIF_CACHE_MAX_ENTRIES:
+    max_entries = max(1, int(active_policy.exif_entries))
+    if not row or int(row[0] or 0) <= max_entries:
         return
     connection.execute(
         """
@@ -475,7 +527,7 @@ def prune_exif_cache_sqlite(connection: sqlite3.Connection) -> None:
           SELECT key FROM exif_cache ORDER BY used DESC LIMIT ?
         )
         """,
-        (EXIF_CACHE_MAX_ENTRIES,),
+        (max_entries,),
     )
 
 
@@ -508,6 +560,85 @@ def app_cache_dir() -> Path | None:
         except OSError:
             continue
     return None
+
+
+def cache_policy(directory: Path | None = None) -> CachePolicy:
+    target = directory or app_cache_dir()
+    if target is not None:
+        try:
+            target.mkdir(parents=True, exist_ok=True)
+            usage = shutil.disk_usage(target)
+            free = int(usage.free)
+            total = max(1, int(usage.total))
+            free_ratio = free / total
+            if free < 8 * GIB or free_ratio < 0.08:
+                return CachePolicy(
+                    pressure="tight",
+                    preview_bytes=PREVIEW_DISK_CACHE_TIGHT_BYTES,
+                    current_preview_age=PREVIEW_CACHE_TIGHT_CURRENT_MAX_AGE_SECONDS,
+                    noncurrent_preview_age=PREVIEW_CACHE_TIGHT_NONCURRENT_MAX_AGE_SECONDS,
+                    exif_entries=EXIF_CACHE_TIGHT_MAX_ENTRIES,
+                    exif_age=EXIF_CACHE_TIGHT_MAX_AGE_SECONDS,
+                )
+            if free < 32 * GIB or free_ratio < 0.15:
+                preview_bytes = int(max(1 * GIB, min(PREVIEW_DISK_CACHE_NORMAL_BYTES, free * 0.03)))
+                return CachePolicy(
+                    pressure="normal",
+                    preview_bytes=preview_bytes,
+                    current_preview_age=PREVIEW_CACHE_CURRENT_PROJECT_MAX_AGE_SECONDS,
+                    noncurrent_preview_age=PREVIEW_CACHE_NONCURRENT_MAX_AGE_SECONDS,
+                    exif_entries=EXIF_CACHE_MAX_ENTRIES,
+                    exif_age=EXIF_CACHE_NORMAL_MAX_AGE_SECONDS,
+                )
+            preview_bytes = int(max(4 * GIB, min(PREVIEW_DISK_CACHE_ABUNDANT_BYTES, free * 0.03)))
+            return CachePolicy(
+                pressure="abundant",
+                preview_bytes=preview_bytes,
+                current_preview_age=PREVIEW_CACHE_CURRENT_PROJECT_MAX_AGE_SECONDS,
+                noncurrent_preview_age=PREVIEW_CACHE_ABUNDANT_NONCURRENT_MAX_AGE_SECONDS,
+                exif_entries=EXIF_CACHE_ABUNDANT_MAX_ENTRIES,
+                exif_age=EXIF_CACHE_ABUNDANT_MAX_AGE_SECONDS,
+            )
+        except OSError:
+            pass
+    return CachePolicy(
+        pressure="normal",
+        preview_bytes=PREVIEW_DISK_CACHE_NORMAL_BYTES,
+        current_preview_age=PREVIEW_CACHE_CURRENT_PROJECT_MAX_AGE_SECONDS,
+        noncurrent_preview_age=PREVIEW_CACHE_NONCURRENT_MAX_AGE_SECONDS,
+        exif_entries=EXIF_CACHE_MAX_ENTRIES,
+        exif_age=EXIF_CACHE_NORMAL_MAX_AGE_SECONDS,
+    )
+
+
+def normalized_path_text(path_text: Any) -> str:
+    text = clean_text(path_text)
+    if not text:
+        return ""
+    try:
+        value = str(Path(text).expanduser().resolve())
+    except OSError:
+        value = str(Path(text).expanduser())
+    return os.path.normcase(value) if os.name == "nt" else value
+
+
+def current_project_roots() -> set[str]:
+    roots: set[str] = set()
+    for album in SESSIONS.values():
+        root = normalized_path_text(album.get("root"))
+        if root:
+            roots.add(root)
+    return roots
+
+
+def path_is_under_root(path_text: Any, root_text: str) -> bool:
+    path = normalized_path_text(path_text)
+    root = normalized_path_text(root_text)
+    if not path or not root:
+        return False
+    if path == root:
+        return True
+    return path.startswith(root.rstrip("\\/") + os.sep)
 
 
 def read_native_exif_parallel(paths: list[Path]) -> list[tuple[Path, dict[str, str], bool]]:
@@ -1094,7 +1225,12 @@ def get_cached_preview(key: str) -> bytes | None:
     return data
 
 
-def remember_preview(key: str, data: bytes, persist: bool = True) -> None:
+def remember_preview(
+    key: str,
+    data: bytes,
+    persist: bool = True,
+    disk_metadata: dict[str, Any] | None = None,
+) -> None:
     global PREVIEW_CACHE_BYTES
     with PREVIEW_CACHE_LOCK:
         old_data = PREVIEW_CACHE.pop(key, None)
@@ -1111,7 +1247,7 @@ def remember_preview(key: str, data: bytes, persist: bool = True) -> None:
             _, removed = PREVIEW_CACHE.popitem(last=False)
             PREVIEW_CACHE_BYTES -= len(removed)
     if persist:
-        remember_disk_preview(key, data)
+        remember_disk_preview(key, data, disk_metadata)
 
 
 def preview_cache_byte_limit() -> int:
@@ -1172,14 +1308,13 @@ def get_disk_cached_preview(key: str) -> bytes | None:
         return None
     try:
         data = path.read_bytes()
-        now = time.time()
-        os.utime(path, (now, now))
+        touch_preview_disk_cache(path)
         return data
     except OSError:
         return None
 
 
-def remember_disk_preview(key: str, data: bytes) -> None:
+def remember_disk_preview(key: str, data: bytes, metadata: dict[str, Any] | None = None) -> None:
     path = preview_disk_cache_path(key)
     if path is None:
         return
@@ -1188,6 +1323,7 @@ def remember_disk_preview(key: str, data: bytes) -> None:
         tmp = path.with_suffix(".tmp")
         tmp.write_bytes(data)
         tmp.replace(path)
+        write_preview_disk_metadata(path, metadata)
         if should_prune_preview_disk_cache():
             prune_preview_disk_cache(path.parent)
     except OSError:
@@ -1214,39 +1350,120 @@ def preview_disk_cache_path(key: str) -> Path | None:
     return directory / "preview-cache" / f"{key}.jpg" if directory else None
 
 
+def preview_disk_metadata_path(path: Path) -> Path:
+    return path.with_suffix(".json")
+
+
+def touch_preview_disk_cache(path: Path) -> None:
+    now = time.time()
+    try:
+        os.utime(path, (now, now))
+    except OSError:
+        return
+    metadata = read_preview_disk_metadata(path)
+    if metadata:
+        metadata["used"] = now
+        write_preview_disk_metadata(path, metadata)
+
+
+def write_preview_disk_metadata(path: Path, metadata: dict[str, Any] | None) -> None:
+    if metadata is None:
+        return
+    payload = dict(metadata)
+    payload["used"] = time.time()
+    try:
+        meta_path = preview_disk_metadata_path(path)
+        tmp = meta_path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(payload, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+        tmp.replace(meta_path)
+    except OSError:
+        pass
+
+
+def read_preview_disk_metadata(path: Path) -> dict[str, Any]:
+    try:
+        data = json.loads(preview_disk_metadata_path(path).read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def preview_metadata_is_current_project(metadata: dict[str, Any], roots: set[str]) -> bool:
+    if not metadata or not roots:
+        return False
+    album_root = normalized_path_text(metadata.get("albumRoot"))
+    photo_path = normalized_path_text(metadata.get("photoPath"))
+    for root in roots:
+        if album_root and (album_root == root or path_is_under_root(album_root, root)):
+            return True
+        if photo_path and path_is_under_root(photo_path, root):
+            return True
+    return False
+
+
+def delete_preview_cache_file(path: Path) -> int:
+    size = 0
+    try:
+        size = path.stat().st_size
+    except OSError:
+        pass
+    for target in (path, preview_disk_metadata_path(path)):
+        try:
+            target.unlink()
+        except OSError:
+            continue
+    return size
+
+
+def prune_orphan_preview_metadata(directory: Path) -> None:
+    try:
+        for path in directory.glob("*.json"):
+            if not path.with_suffix(".jpg").exists():
+                try:
+                    path.unlink()
+                except OSError:
+                    continue
+    except OSError:
+        pass
+
+
 def prune_preview_disk_cache(directory: Path) -> None:
     try:
         files = [path for path in directory.glob("*.jpg") if path.is_file()]
     except OSError:
         return
+    prune_orphan_preview_metadata(directory)
+    policy = cache_policy(directory)
+    roots = current_project_roots()
+    now = time.time()
     total = 0
-    items: list[tuple[float, int, Path]] = []
+    items: list[tuple[int, float, int, Path]] = []
     for path in files:
         try:
             stat = path.stat()
+            metadata = read_preview_disk_metadata(path)
+            is_current = preview_metadata_is_current_project(metadata, roots)
+            max_age = policy.current_preview_age if is_current else policy.noncurrent_preview_age
+            if now - stat.st_mtime > max_age:
+                delete_preview_cache_file(path)
+                continue
             total += stat.st_size
-            items.append((stat.st_mtime, stat.st_size, path))
+            priority = 1 if is_current else 0
+            items.append((priority, stat.st_mtime, stat.st_size, path))
         except OSError:
             continue
-    limit = preview_disk_cache_limit(directory)
+    limit = policy.preview_bytes
     if total <= limit:
         return
-    for _, size, path in sorted(items, key=lambda item: item[0]):
-        try:
-            path.unlink()
-            total -= size
-        except OSError:
-            continue
+    for _, _, size, path in sorted(items, key=lambda item: (item[0], item[1])):
+        removed = delete_preview_cache_file(path) or size
+        total -= removed
         if total <= limit:
             return
 
 
 def preview_disk_cache_limit(directory: Path) -> int:
-    try:
-        free = shutil.disk_usage(directory).free
-        return int(max(PREVIEW_DISK_CACHE_MIN_BYTES, min(PREVIEW_DISK_CACHE_MAX_BYTES, free // 8)))
-    except OSError:
-        return PREVIEW_DISK_CACHE_MIN_BYTES
+    return cache_policy(directory).preview_bytes
 
 
 def cache_stats() -> dict[str, Any]:
@@ -1351,6 +1568,7 @@ def clear_preview_cache_storage() -> None:
     directory = preview_disk_cache_path("0" * 64)
     if directory is not None:
         remove_matching_files(directory.parent, "*.jpg")
+        remove_matching_files(directory.parent, "*.json")
 
 
 def clear_exif_cache_storage() -> None:
@@ -1370,6 +1588,48 @@ def clear_exif_cache_storage() -> None:
             json_path.unlink()
         except OSError:
             pass
+
+
+def prune_exif_cache_storage() -> None:
+    cache = load_exif_cache()
+    if is_sqlite_exif_cache(cache):
+        db_path = Path(str(cache["path"]))
+        try:
+            with EXIF_CACHE_LOCK:
+                with sqlite3.connect(db_path, timeout=30) as connection:
+                    prune_exif_cache_sqlite(connection, cache_policy(db_path.parent))
+                    connection.commit()
+        except sqlite3.Error:
+            pass
+        return
+    save_exif_cache(cache)
+
+
+def run_cache_maintenance() -> None:
+    cache_dir = app_cache_dir()
+    if cache_dir is None:
+        return
+    preview_dir = cache_dir / "preview-cache"
+    prune_preview_disk_cache(preview_dir)
+    prune_exif_cache_storage()
+
+
+def cache_maintenance_loop() -> None:
+    time.sleep(CACHE_MAINTENANCE_START_DELAY_SECONDS)
+    while True:
+        try:
+            run_cache_maintenance()
+        except Exception:
+            pass
+        time.sleep(CACHE_MAINTENANCE_INTERVAL_SECONDS)
+
+
+def start_cache_maintenance() -> None:
+    with CACHE_MAINTENANCE_LOCK:
+        if CACHE_MAINTENANCE_STATE.get("started"):
+            return
+        CACHE_MAINTENANCE_STATE["started"] = True
+    Thread(target=cache_maintenance_loop, name="EXIF-Banner Cache Maintenance", daemon=True).start()
 
 
 def remove_matching_files(directory: Path, pattern: str) -> None:
@@ -3335,7 +3595,15 @@ class Handler(SimpleHTTPRequestHandler):
             output = io.BytesIO()
             image.save(output, "JPEG", quality=88, subsampling=2)
             data = output.getvalue()
-            remember_preview(cache_key, data)
+            remember_preview(
+                cache_key,
+                data,
+                disk_metadata={
+                    "albumRoot": album.get("root", ""),
+                    "photoPath": photos[index].get("path", ""),
+                    "created": time.time(),
+                },
+            )
         self.send_response(200)
         self.send_header("Content-Type", "image/jpeg")
         self.send_header("Cache-Control", "no-store")
@@ -3464,6 +3732,7 @@ def main() -> None:
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     url = f"http://{args.host}:{args.port}/"
     print(f"EXIF-Banner is running at {url}")
+    start_cache_maintenance()
     if not args.no_browser:
         Timer(0.8, lambda: webbrowser.open(url)).start()
     try:
