@@ -2927,6 +2927,51 @@ def get_album(album_id: str) -> dict[str, Any]:
     return album
 
 
+def album_photo_at(album_id: str, index: Any) -> dict[str, Any]:
+    album = get_album(album_id)
+    photo_index = int(index)
+    photos = album["photos"]
+    if photo_index < 0 or photo_index >= len(photos):
+        raise ValueError("Photo index is out of range.")
+    return photos[photo_index]
+
+
+def render_single_export_image(
+    album_id: str,
+    index: Any,
+    settings: dict[str, Any] | None,
+) -> tuple[Image.Image, dict[str, Any], dict[str, Any]]:
+    photo = album_photo_at(album_id, index)
+    render_settings = export_settings_for_photo(photo, merged_settings(settings))
+    image = render_composite(photo, render_settings)
+    return image, render_settings, photo
+
+
+def rendered_photo_bytes(
+    album_id: str,
+    index: Any,
+    settings: dict[str, Any] | None,
+    format_override: str = "",
+) -> dict[str, Any]:
+    image, render_settings, _ = render_single_export_image(album_id, index, settings)
+    if format_override in {"png", "jpeg"}:
+        render_settings = {**render_settings, "exportFormat": format_override}
+    return export_image_bytes(image, render_settings)
+
+
+def rendered_photo_clipboard_dib(
+    album_id: str,
+    index: Any,
+    settings: dict[str, Any] | None,
+) -> bytes:
+    image, _, _ = render_single_export_image(album_id, index, settings)
+    if image.mode != "RGB":
+        image = image.convert("RGB")
+    output = io.BytesIO()
+    image.save(output, "BMP")
+    return output.getvalue()[14:]
+
+
 def timestamp() -> str:
     return datetime.now().strftime("%Y%m%d_%H%M%S")
 
@@ -3237,6 +3282,8 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.send_json(open_local_path(clean_text(payload.get("path"))))
             if parsed.path == "/api/banner-layout":
                 return self.send_json(self.banner_layout(payload))
+            if parsed.path == "/api/render-image":
+                return self.send_rendered_image(payload)
             if parsed.path == "/api/preview":
                 return self.send_preview(payload)
             if parsed.path == "/api/export/images":
@@ -3291,6 +3338,19 @@ class Handler(SimpleHTTPRequestHandler):
             remember_preview(cache_key, data)
         self.send_response(200)
         self.send_header("Content-Type", "image/jpeg")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def send_rendered_image(self, payload: dict[str, Any]) -> None:
+        album_id = clean_text(payload.get("albumId"))
+        index = int(payload.get("index", 0))
+        format_override = clean_text(payload.get("format")).lower()
+        rendered = rendered_photo_bytes(album_id, index, payload.get("settings"), format_override)
+        data = rendered["data"]
+        self.send_response(200)
+        self.send_header("Content-Type", rendered["mime"])
         self.send_header("Cache-Control", "no-store")
         self.send_header("Content-Length", str(len(data)))
         self.end_headers()

@@ -20,9 +20,9 @@ except ImportError as exc:
     ) from exc
 
 try:
-    from server import Handler
+    from server import Handler, rendered_photo_clipboard_dib
 except ModuleNotFoundError:
-    from .server import Handler
+    from .server import Handler, rendered_photo_clipboard_dib
 
 
 APP_TITLE = "EXIF-Banner"
@@ -60,6 +60,10 @@ class NativeDialogs:
     def show_message(self, kind: str, title: str, message: str) -> bool:
         show_native_message(kind, title, message)
         return True
+
+    def copy_current_image(self, album_id: str, index: int, settings: dict[str, Any]) -> bool:
+        data = rendered_photo_clipboard_dib(album_id, index, settings)
+        return copy_dib_to_clipboard(data)
 
     def open_path(self, path: str) -> bool:
         open_local_path(path)
@@ -208,6 +212,50 @@ def open_local_path(path: str) -> None:
         subprocess.Popen(["open", str(target)])
     else:
         subprocess.Popen(["xdg-open", str(target)])
+
+
+def copy_dib_to_clipboard(data: bytes) -> bool:
+    if os.name != "nt":
+        return False
+    if not data:
+        raise RuntimeError("Rendered image is empty.")
+
+    user32 = ctypes.windll.user32
+    kernel32 = ctypes.windll.kernel32
+    kernel32.GlobalAlloc.argtypes = [ctypes.c_uint, ctypes.c_size_t]
+    kernel32.GlobalAlloc.restype = ctypes.c_void_p
+    kernel32.GlobalLock.argtypes = [ctypes.c_void_p]
+    kernel32.GlobalLock.restype = ctypes.c_void_p
+    kernel32.GlobalUnlock.argtypes = [ctypes.c_void_p]
+    kernel32.GlobalFree.argtypes = [ctypes.c_void_p]
+    user32.SetClipboardData.argtypes = [ctypes.c_uint, ctypes.c_void_p]
+    user32.SetClipboardData.restype = ctypes.c_void_p
+
+    handle = kernel32.GlobalAlloc(0x0002, len(data))
+    if not handle:
+        raise RuntimeError("Unable to allocate clipboard memory.")
+    try:
+        pointer = kernel32.GlobalLock(handle)
+        if not pointer:
+            raise RuntimeError("Unable to lock clipboard memory.")
+        try:
+            ctypes.memmove(pointer, data, len(data))
+        finally:
+            kernel32.GlobalUnlock(handle)
+
+        if not user32.OpenClipboard(None):
+            raise RuntimeError("Clipboard is unavailable.")
+        try:
+            user32.EmptyClipboard()
+            if not user32.SetClipboardData(8, handle):
+                raise RuntimeError("Unable to write image to clipboard.")
+            handle = None
+        finally:
+            user32.CloseClipboard()
+    finally:
+        if handle:
+            kernel32.GlobalFree(handle)
+    return True
 
 
 def set_windows_app_user_model_id() -> None:

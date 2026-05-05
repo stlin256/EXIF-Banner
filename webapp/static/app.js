@@ -127,6 +127,8 @@ const translations = {
     "sort.dateDesc": "时间 ↓",
     "sort.nameAsc": "A-Z",
     "sort.nameDesc": "Z-A",
+    "context.copyImage": "复制图片",
+    "context.exportCurrentImage": "导出此图片",
     "empty.preview": "选择相册后开始预览",
     "field.background": "背景色",
     "field.bannerColor": "横幅色",
@@ -159,6 +161,7 @@ const translations = {
     "status.error": "出错",
     "status.exportedImages": "已导出 {count} 张图片",
     "status.exportedPptx": "已导出 {count} 页 PPTX",
+    "status.imageCopied": "图片已复制",
     "status.exportCanceled": "导出已取消",
     "status.exporting": "导出中",
     "status.cacheCleared": "缓存已清理",
@@ -167,11 +170,13 @@ const translations = {
     "error.requestFailed": "请求失败",
     "error.previewRenderFailed": "预览渲染失败",
     "error.exportFailed": "导出失败",
+    "error.clipboardUnavailable": "当前环境无法访问图片剪贴板",
     "alert.selectPhotos": "请先勾选要导出的照片。",
     "toast.currentCameraBrand": "当前相机品牌",
     "toast.missingLogo": "未找到 {brand} 的内置 Logo，可手动选择 Logo。",
     "exif.none": "无 EXIF",
     "export.images": "导出图片",
+    "export.currentImage": "导出此图片",
     "export.pptx": "导出 PPTX",
     "dialog.exportComplete": "导出完成",
     "dialog.exportCompleteSummary": "已完成导出",
@@ -181,6 +186,7 @@ const translations = {
     "dialog.openLocation": "打开保存位置",
     "dialog.openLocationQuestion": "是否打开保存位置？",
     "progress.prepareExport": "准备导出",
+    "progress.copyingImage": "复制图片",
     "progress.exportComplete": "导出完成",
     "progress.exportFailed": "导出失败",
     "progress.cancelingExport": "正在取消",
@@ -222,6 +228,8 @@ const translations = {
     "sort.dateDesc": "Date ↓",
     "sort.nameAsc": "A-Z",
     "sort.nameDesc": "Z-A",
+    "context.copyImage": "Copy Image",
+    "context.exportCurrentImage": "Export This Image",
     "empty.preview": "Choose an album to start previewing",
     "field.background": "Background",
     "field.bannerColor": "Banner Color",
@@ -254,6 +262,7 @@ const translations = {
     "status.error": "Error",
     "status.exportedImages": "Exported {count} images",
     "status.exportedPptx": "Exported {count} PPTX slides",
+    "status.imageCopied": "Image copied",
     "status.exportCanceled": "Export canceled",
     "status.exporting": "Exporting",
     "status.cacheCleared": "Cache cleared",
@@ -262,11 +271,13 @@ const translations = {
     "error.requestFailed": "Request failed",
     "error.previewRenderFailed": "Preview render failed",
     "error.exportFailed": "Export failed",
+    "error.clipboardUnavailable": "Image clipboard access is unavailable in this environment",
     "alert.selectPhotos": "Select photos to export first.",
     "toast.currentCameraBrand": "current camera brand",
     "toast.missingLogo": "No built-in logo was found for {brand}. You can choose one manually.",
     "exif.none": "No EXIF",
     "export.images": "Export Images",
+    "export.currentImage": "Export This Image",
     "export.pptx": "Export PPTX",
     "dialog.exportComplete": "Export Complete",
     "dialog.exportCompleteSummary": "Export finished",
@@ -276,6 +287,7 @@ const translations = {
     "dialog.openLocation": "Open Save Location",
     "dialog.openLocationQuestion": "Open the save location?",
     "progress.prepareExport": "Preparing export",
+    "progress.copyingImage": "Copying image",
     "progress.exportComplete": "Export complete",
     "progress.exportFailed": "Export failed",
     "progress.cancelingExport": "Canceling",
@@ -336,6 +348,7 @@ function init() {
   });
   $("photoList").addEventListener("scroll", scheduleVirtualPhotoListRender, { passive: true });
   setupBannerEditing();
+  setupPreviewContextMenu();
   $("previewStage").addEventListener("wheel", handlePreviewWheel, { passive: false });
   document.addEventListener("keydown", handleKeyNavigation);
 
@@ -491,6 +504,59 @@ function setupBannerEditing() {
     field.addEventListener("blur", handleBannerEditBlur);
     field.addEventListener("keydown", handleBannerEditKeydown);
     field.addEventListener("paste", pastePlainText);
+  }
+}
+
+function setupPreviewContextMenu() {
+  const menu = $("previewContextMenu");
+  $("previewStage").addEventListener("contextmenu", handlePreviewContextMenu);
+  $("copyImageMenuItem").addEventListener("click", () => {
+    hidePreviewContextMenu();
+    copyCurrentImage().catch(showError);
+  });
+  $("exportCurrentImageMenuItem").addEventListener("click", () => {
+    hidePreviewContextMenu();
+    exportCurrentImage().catch(showError);
+  });
+  menu.addEventListener("click", (event) => event.stopPropagation());
+  document.addEventListener("click", hidePreviewContextMenu);
+  window.addEventListener("blur", hidePreviewContextMenu);
+  window.addEventListener("resize", hidePreviewContextMenu);
+  setLocalIcon($("copyImageMenuIcon"), "copy");
+  setLocalIcon($("exportCurrentImageMenuIcon"), "download");
+}
+
+function handlePreviewContextMenu(event) {
+  if (
+    !state.albumId ||
+    !state.photos[state.current] ||
+    $("slideCanvas").hidden ||
+    !event.target.closest("#slideCanvas")
+  ) {
+    return;
+  }
+  event.preventDefault();
+  event.stopPropagation();
+  closeSortMenu();
+  showPreviewContextMenu(event.clientX, event.clientY);
+}
+
+function showPreviewContextMenu(clientX, clientY) {
+  const menu = $("previewContextMenu");
+  menu.hidden = false;
+  const rect = menu.getBoundingClientRect();
+  const margin = 8;
+  const left = Math.min(Math.max(margin, clientX), Math.max(margin, window.innerWidth - rect.width - margin));
+  const top = Math.min(Math.max(margin, clientY), Math.max(margin, window.innerHeight - rect.height - margin));
+  menu.style.left = `${left}px`;
+  menu.style.top = `${top}px`;
+  $("copyImageMenuItem").focus();
+}
+
+function hidePreviewContextMenu() {
+  const menu = $("previewContextMenu");
+  if (menu) {
+    menu.hidden = true;
   }
 }
 
@@ -694,6 +760,29 @@ async function api(path, payload = {}) {
     throw new Error(data.error || t("error.requestFailed"));
   }
   return data;
+}
+
+async function apiBlob(path, payload = {}) {
+  const response = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    cache: "no-store",
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    throw new Error(await responseErrorMessage(response));
+  }
+  return response.blob();
+}
+
+async function responseErrorMessage(response) {
+  try {
+    const data = await response.clone().json();
+    return data.error || t("error.requestFailed");
+  } catch {
+    const text = await response.text();
+    return text || t("error.requestFailed");
+  }
 }
 
 async function loadCacheStats() {
@@ -1154,6 +1243,11 @@ function resetWheelBuffer() {
 }
 
 function handleKeyNavigation(event) {
+  if (event.key === "Escape" && !$("previewContextMenu").hidden) {
+    event.preventDefault();
+    hidePreviewContextMenu();
+    return;
+  }
   if (event.key === "Escape" && !$("sortMenu").hidden) {
     event.preventDefault();
     closeSortMenu();
@@ -1420,6 +1514,7 @@ function updateSliderLabels() {
 }
 
 function updatePreview() {
+  hidePreviewContextMenu();
   const canvas = $("slideCanvas");
   const image = $("previewImage");
   const banner = $("bannerPreview");
@@ -2320,6 +2415,88 @@ function escapeHtml(value) {
     '"': "&quot;",
     "'": "&#039;",
   })[char]);
+}
+
+async function copyCurrentImage() {
+  if (!state.albumId || !state.photos[state.current]) {
+    return;
+  }
+  readSettings();
+  setBusy("progress.copyingImage", null);
+  await nextFrame();
+  try {
+    const nativeCopied = await copyCurrentImageNative();
+    if (!nativeCopied) {
+      await copyCurrentImageWithClipboardApi();
+    }
+    setIdle("status.imageCopied");
+    showToast(t("status.imageCopied"));
+  } catch (error) {
+    showError(error);
+  }
+}
+
+async function copyCurrentImageNative() {
+  if (!window.pywebview?.api?.copy_current_image) {
+    return false;
+  }
+  try {
+    return !!(await window.pywebview.api.copy_current_image(state.albumId, state.current, state.settings));
+  } catch (error) {
+    console.error(error);
+    return false;
+  }
+}
+
+async function copyCurrentImageWithClipboardApi() {
+  if (!navigator.clipboard?.write || typeof ClipboardItem === "undefined") {
+    throw new Error(t("error.clipboardUnavailable"));
+  }
+  const blob = await apiBlob("/api/render-image", {
+    albumId: state.albumId,
+    index: state.current,
+    settings: state.settings,
+    format: "png",
+  });
+  await navigator.clipboard.write([
+    new ClipboardItem({
+      [blob.type || "image/png"]: blob,
+    }),
+  ]);
+}
+
+async function exportCurrentImage() {
+  if (!state.albumId || !state.photos[state.current]) {
+    return;
+  }
+  readSettings();
+  try {
+    const picked = await api("/api/pick-output-dir");
+    if (!picked.folder) {
+      setIdle("status.ready");
+      return;
+    }
+
+    setBusy("export.currentImage", 0);
+    await nextFrame();
+    const started = await api("/api/export/start", {
+      kind: "images",
+      albumId: state.albumId,
+      settings: state.settings,
+      selection: [state.current],
+      outputDir: picked.folder,
+    });
+    state.currentExportJobId = started.jobId || "";
+    state.exportCanceling = false;
+    setExportCancelVisible(!!state.currentExportJobId);
+    await pollExportJob(started.jobId, "images");
+  } catch (error) {
+    showError(error);
+  } finally {
+    state.currentExportJobId = "";
+    state.exportCanceling = false;
+    setExportCancelVisible(false);
+  }
 }
 
 async function exportAlbum(kind) {

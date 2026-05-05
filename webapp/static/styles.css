@@ -1009,6 +1009,53 @@ body.busy .busyOverlay {
   background: var(--accent-strong);
 }
 
+.contextMenu {
+  position: fixed;
+  z-index: 90;
+  min-width: 148px;
+  padding: 5px;
+  border: 1px solid var(--line);
+  background: #fffefa;
+  box-shadow: 0 14px 32px rgba(38, 34, 27, 0.2);
+}
+
+.contextMenuItem {
+  width: 100%;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  border-color: transparent;
+  background: transparent;
+  padding: 0 10px;
+  text-align: left;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.contextMenuItem:hover,
+.contextMenuItem:focus-visible {
+  border-color: transparent;
+  background: #edf2ec;
+  color: var(--accent-strong);
+  outline: none;
+}
+
+.contextMenuIcon {
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent-strong);
+}
+
+.contextMenuIcon svg {
+  width: 17px;
+  height: 17px;
+}
+
 .toast {
   position: fixed;
   right: 22px;
