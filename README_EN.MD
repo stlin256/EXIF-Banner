@@ -1,5 +1,9 @@
 # EXIF-Banner
 
+<p align="center">
+  <img src="webapp/static/exif-banner-logo.svg" alt="EXIF-Banner" width="360">
+</p>
+
 [![Release](https://img.shields.io/github/v/release/stlin256/EXIF-Banner?label=release)](https://github.com/stlin256/EXIF-Banner/releases)
 
 [中文](README.MD)

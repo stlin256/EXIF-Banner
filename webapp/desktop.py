@@ -24,6 +24,7 @@ except ModuleNotFoundError:
 
 
 APP_TITLE = "EXIF-Banner"
+APP_USER_MODEL_ID = "stlin256.EXIFBanner"
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8765
 DEFAULT_WIDTH = 1360
@@ -162,6 +163,15 @@ def show_native_message(kind: str, title: str, message: str) -> None:
         print(f"{title_text}\n{message_text}")
 
 
+def set_windows_app_user_model_id() -> None:
+    if os.name != "nt":
+        return
+    try:
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(APP_USER_MODEL_ID)
+    except (AttributeError, OSError):
+        pass
+
+
 def clean_dialog_text(value: Any) -> str:
     return str(value or "").replace("\r\n", "\n").strip()
 
@@ -191,6 +201,7 @@ def start_webview(url: str, debug: bool, language: str) -> None:
 
 def main() -> None:
     args = parse_args()
+    set_windows_app_user_model_id()
     server, thread, url = start_local_server(args.host, args.port)
     try:
         start_webview(url, args.debug, args.language)

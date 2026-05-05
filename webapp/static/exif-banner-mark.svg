@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 88" role="img" aria-labelledby="title desc">
+  <title id="title">EXIF-Banner mark</title>
+  <desc id="desc">A camera outline with an aperture ring and a small banner line.</desc>
+  <g fill="none" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M15 72H5" stroke="#1f211f" stroke-width="6"/>
+    <path d="M123 72H82" stroke="#1f211f" stroke-width="6"/>
+    <path d="M16 72V30c0-7 5-12 12-12h14l8-10h31l8 10h17c7 0 12 5 12 12v42" stroke="#1f211f" stroke-width="6"/>
+    <path d="M99 28h9" stroke="#1f211f" stroke-width="6"/>
+    <circle cx="64" cy="53" r="26" stroke="#1f211f" stroke-width="6"/>
+    <circle cx="64" cy="53" r="15" stroke="#f2a312" stroke-width="6"/>
+    <path d="M38 78h52" stroke="#f2a312" stroke-width="5"/>
+  </g>
+</svg>

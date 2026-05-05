@@ -97,12 +97,27 @@ input[type="color"] {
 
 .brand {
   display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.brandMark {
+  width: 50px;
+  height: 36px;
+  flex: 0 0 auto;
+}
+
+.brandTextBlock {
+  display: flex;
   flex-direction: column;
   gap: 2px;
+  min-width: 0;
 }
 
 .brand strong {
   font-size: 15px;
+  line-height: 1.1;
 }
 
 .brandLine {

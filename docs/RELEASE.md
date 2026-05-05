@@ -119,6 +119,7 @@ $env:PYTHONNOUSERSITE = "1"
   --onefile `
   --windowed `
   --name EXIF-Banner `
+  --icon "$root\webapp\static\exif-banner.ico" `
   --paths "$root\webapp" `
   --add-data "$root\webapp\static;static" `
   --add-data "$root\webapp\logos;logos" `
