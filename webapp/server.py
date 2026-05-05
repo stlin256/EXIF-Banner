@@ -65,6 +65,7 @@ PREVIEW_CACHE_MAX_ITEMS = 4096
 PREVIEW_CACHE_ESTIMATED_ITEM_BYTES = 384 * 1024
 PREVIEW_DISK_CACHE_MIN_BYTES = 512 * MIB
 PREVIEW_DISK_CACHE_MAX_BYTES = 8 * GIB
+PREVIEW_CACHE_IGNORED_SETTINGS = {"bannerTextOverrides", "exportFormat", "exportScalePct", "quality"}
 RESAMPLE = getattr(getattr(Image, "Resampling", Image), "LANCZOS")
 EXPORT_MAX_EDGE = 30000
 EXPORT_MAX_PIXELS = 250_000_000
@@ -858,10 +859,20 @@ def preview_cache_key(album_id: str, index: int, photo: dict[str, Any], settings
         "file": file_signature,
         "maxSize": max_size,
         "logo": render_logo_signature(photo.get("exif") or {}, settings),
-        "settings": settings,
+        "settings": preview_cache_settings(photo, settings),
     }
     payload = json.dumps(signature, sort_keys=True, ensure_ascii=False, default=str).encode("utf-8")
     return hashlib.sha256(payload).hexdigest()
+
+
+def preview_cache_settings(photo: dict[str, Any], settings: dict[str, Any]) -> dict[str, Any]:
+    relevant = {
+        key: value
+        for key, value in settings.items()
+        if key not in PREVIEW_CACHE_IGNORED_SETTINGS
+    }
+    relevant["bannerTextOverride"] = banner_text_overrides(photo, settings)
+    return relevant
 
 
 def get_cached_preview(key: str) -> bytes | None:

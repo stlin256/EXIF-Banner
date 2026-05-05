@@ -1793,8 +1793,18 @@ function setPreviewImage(url) {
 }
 
 function previewCacheKey(index) {
-  const { exportScalePct, exportFormat, quality, ...previewSettings } = state.settings;
+  const { exportScalePct, exportFormat, quality, bannerTextOverrides, ...previewSettings } = state.settings;
+  previewSettings.bannerTextOverride = previewTextOverrideForIndex(index);
   return `${state.albumId}:${index}:${JSON.stringify(previewSettings)}`;
+}
+
+function previewTextOverrideForIndex(index) {
+  const photo = state.photos[index];
+  if (!photo) {
+    return {};
+  }
+  const overrides = state.settings.bannerTextOverrides || {};
+  return overrides[photoOverrideKey(photo)] || {};
 }
 
 function getCachedPreview(index) {
