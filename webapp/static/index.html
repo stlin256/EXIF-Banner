@@ -22,6 +22,9 @@
       </div>
       <div class="pathbar">
         <input id="folderInput" type="text" value="" placeholder="选择相册文件夹" data-i18n-placeholder="placeholder.albumFolder" />
+        <select id="recentFolderSelect" class="recentFolderSelect" data-i18n-title="field.recentProjects" data-i18n-aria-label="field.recentProjects">
+          <option value="" data-i18n="recent.placeholder">最近</option>
+        </select>
         <button id="pickFolderBtn" type="button" data-i18n="button.pickAlbum">选择相册</button>
         <label class="check"><input id="recursiveInput" type="checkbox" /> <span data-i18n="control.recursive">递归</span></label>
         <button id="scanBtn" type="button" data-i18n="button.scan">扫描</button>

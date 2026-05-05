@@ -149,9 +149,13 @@ input[type="color"] {
 
 .pathbar {
   display: grid;
-  grid-template-columns: minmax(180px, 1fr) auto auto auto;
+  grid-template-columns: minmax(180px, 1fr) minmax(92px, 128px) auto auto auto;
   gap: 8px;
   align-items: center;
+}
+
+.recentFolderSelect {
+  min-width: 0;
 }
 
 .actions {

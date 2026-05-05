@@ -56,6 +56,7 @@ const state = {
   lastSettingsChangeAt: 0,
   language: "zh",
   sortMode: "dateAsc",
+  recentProjects: [],
   statusMessage: { key: "status.waitingScan", args: {} },
   exportDialog: null,
   currentExportJobId: "",
@@ -96,6 +97,7 @@ const translations = {
     "placeholder.albumFolder": "选择相册文件夹",
     "placeholder.logoPath": "留空则按相机品牌自动匹配",
     "placeholder.brandText": "留空则自动读取相机品牌",
+    "recent.placeholder": "最近",
     "button.pickAlbum": "选择相册",
     "button.scan": "扫描",
     "button.exportImages": "导出图片",
@@ -132,6 +134,7 @@ const translations = {
     "field.paramsText": "参数内容",
     "field.aspectRatio": "底片比例",
     "field.exportFormat": "导出格式",
+    "field.recentProjects": "最近项目",
     "cache.preview": "预览缓存",
     "cache.exif": "EXIF 缓存",
     "slider.bannerWidth": "横幅宽度",
@@ -186,6 +189,7 @@ const translations = {
     "placeholder.albumFolder": "Select album folder",
     "placeholder.logoPath": "Leave empty to match the camera brand",
     "placeholder.brandText": "Leave empty to use the camera brand",
+    "recent.placeholder": "Recent",
     "button.pickAlbum": "Choose Album",
     "button.scan": "Scan",
     "button.exportImages": "Export Images",
@@ -222,6 +226,7 @@ const translations = {
     "field.paramsText": "Params Text",
     "field.aspectRatio": "Canvas Ratio",
     "field.exportFormat": "Export Format",
+    "field.recentProjects": "Recent Projects",
     "cache.preview": "Preview Cache",
     "cache.exif": "EXIF Cache",
     "slider.bannerWidth": "Banner Width",
@@ -290,6 +295,7 @@ function init() {
   const saved = loadSavedState();
   state.language = normalizeLanguage(saved.language || "zh");
   state.sortMode = normalizeSortMode(saved.sortMode);
+  state.recentProjects = normalizeRecentProjects(saved.recentProjects);
   state.settings = { ...defaults, ...(saved.settings || {}) };
   configurePreviewCacheBudget();
   migrateLayoutSettings(saved.settings || {});
@@ -300,7 +306,9 @@ function init() {
   $("recursiveInput").checked = !!saved.recursive;
   setupLanguageControl();
   setupSortControl();
+  renderRecentProjects();
   $("pickFolderBtn").addEventListener("click", pickFolder);
+  $("recentFolderSelect").addEventListener("change", selectRecentProject);
   $("pickLogoBtn").addEventListener("click", pickLogo);
   $("scanBtn").addEventListener("click", scan);
   $("exportImagesBtn").addEventListener("click", () => exportAlbum("images"));
@@ -386,6 +394,85 @@ function toggleLanguage() {
 
 function normalizeSortMode(sortMode) {
   return ["dateAsc", "dateDesc", "nameAsc", "nameDesc"].includes(sortMode) ? sortMode : "dateAsc";
+}
+
+function normalizeRecentProjects(items) {
+  if (!Array.isArray(items)) {
+    return [];
+  }
+  const seen = new Set();
+  const projects = [];
+  for (const item of items) {
+    const folder = String(item?.folder || "").trim();
+    if (!folder || seen.has(folder.toLocaleLowerCase())) {
+      continue;
+    }
+    seen.add(folder.toLocaleLowerCase());
+    projects.push({
+      folder,
+      recursive: !!item.recursive,
+      sortMode: normalizeSortMode(item.sortMode),
+      lastOpened: Number(item.lastOpened || 0),
+    });
+    if (projects.length >= 8) {
+      break;
+    }
+  }
+  return projects;
+}
+
+function rememberRecentProject(folder) {
+  const entry = {
+    folder: String(folder || "").trim(),
+    recursive: $("recursiveInput").checked,
+    sortMode: state.sortMode,
+    lastOpened: Date.now(),
+  };
+  if (!entry.folder) {
+    return;
+  }
+  state.recentProjects = [
+    entry,
+    ...state.recentProjects.filter((project) => project.folder.toLocaleLowerCase() !== entry.folder.toLocaleLowerCase()),
+  ].slice(0, 8);
+  renderRecentProjects();
+}
+
+function renderRecentProjects() {
+  const select = $("recentFolderSelect");
+  if (!select) {
+    return;
+  }
+  const currentValue = select.value;
+  select.replaceChildren();
+  select.append(new Option(t("recent.placeholder"), ""));
+  state.recentProjects.forEach((project, index) => {
+    const option = new Option(recentProjectLabel(project.folder), String(index));
+    option.title = project.folder;
+    select.append(option);
+  });
+  select.value = currentValue && Number(currentValue) < state.recentProjects.length ? currentValue : "";
+}
+
+function recentProjectLabel(folder) {
+  const parts = String(folder || "").split(/[\\/]+/).filter(Boolean);
+  return parts[parts.length - 1] || folder || t("recent.placeholder");
+}
+
+async function selectRecentProject() {
+  const select = $("recentFolderSelect");
+  const index = Number(select.value);
+  select.value = "";
+  const project = state.recentProjects[index];
+  if (!project) {
+    return;
+  }
+  $("folderInput").value = project.folder;
+  $("recursiveInput").checked = !!project.recursive;
+  state.sortMode = normalizeSortMode(project.sortMode);
+  updateSortControl();
+  saveState();
+  await scan();
 }
 
 function setupBannerEditing() {
@@ -545,6 +632,7 @@ function applyI18n() {
   }
   updateParamsResetControl();
   updateSortControl();
+  renderRecentProjects();
   applyStatusMessage();
   renderExportCompleteDialog();
 }
@@ -736,6 +824,7 @@ async function scan(options = {}) {
       writeSettings();
     }
     renderPhotoList();
+    rememberRecentProject(folder);
     const restoredIndex = isSameProject(saved, folder, data.photos) ? Number(saved.current || 0) : 0;
     selectPhoto(Math.min(restoredIndex, Math.max(0, data.photos.length - 1)));
     updateSelectionUI();
@@ -1284,6 +1373,7 @@ function saveState() {
       current: state.current,
       selection: [...state.selected],
       photoFingerprint: photoFingerprint(state.photos),
+      recentProjects: state.recentProjects,
       settings: state.settings,
       language: state.language,
     }));
