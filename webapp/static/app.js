@@ -58,6 +58,8 @@ const state = {
   sortMode: "dateAsc",
   statusMessage: { key: "status.waitingScan", args: {} },
   exportDialog: null,
+  currentExportJobId: "",
+  exportCanceling: false,
 };
 
 const defaults = {
@@ -104,6 +106,7 @@ const translations = {
     "button.resetParamsText": "重置参数内容",
     "button.pickLogo": "选择 Logo",
     "button.done": "完成",
+    "button.cancelExport": "取消导出",
     "button.switchLanguage": "切换语言",
     "control.recursive": "递归",
     "control.shadow": "图片阴影",
@@ -146,6 +149,7 @@ const translations = {
     "status.error": "出错",
     "status.exportedImages": "已导出 {count} 张图片",
     "status.exportedPptx": "已导出 {count} 页 PPTX",
+    "status.exportCanceled": "导出已取消",
     "status.exporting": "导出中",
     "busy.processing": "处理中",
     "file.notSelected": "未选择",
@@ -166,6 +170,7 @@ const translations = {
     "progress.prepareExport": "准备导出",
     "progress.exportComplete": "导出完成",
     "progress.exportFailed": "导出失败",
+    "progress.cancelingExport": "正在取消",
     "progress.exportingImages": "导出图片 {done}/{total}",
     "progress.renderingSlides": "渲染幻灯片 {done}/{total}",
     "progress.writingPptx": "写入 PPTX",
@@ -184,6 +189,7 @@ const translations = {
     "button.resetParamsText": "Reset Params",
     "button.pickLogo": "Choose Logo",
     "button.done": "Done",
+    "button.cancelExport": "Cancel Export",
     "button.switchLanguage": "Switch Language",
     "control.recursive": "Recursive",
     "control.shadow": "Image Shadow",
@@ -226,6 +232,7 @@ const translations = {
     "status.error": "Error",
     "status.exportedImages": "Exported {count} images",
     "status.exportedPptx": "Exported {count} PPTX slides",
+    "status.exportCanceled": "Export canceled",
     "status.exporting": "Exporting",
     "busy.processing": "Processing",
     "file.notSelected": "Not selected",
@@ -246,6 +253,7 @@ const translations = {
     "progress.prepareExport": "Preparing export",
     "progress.exportComplete": "Export complete",
     "progress.exportFailed": "Export failed",
+    "progress.cancelingExport": "Canceling",
     "progress.exportingImages": "Exporting images {done}/{total}",
     "progress.renderingSlides": "Rendering slides {done}/{total}",
     "progress.writingPptx": "Writing PPTX",
@@ -283,6 +291,7 @@ function init() {
   $("scanBtn").addEventListener("click", scan);
   $("exportImagesBtn").addEventListener("click", () => exportAlbum("images"));
   $("exportPptxBtn").addEventListener("click", () => exportAlbum("pptx"));
+  $("cancelExportBtn").addEventListener("click", cancelExport);
   $("resetBtn").addEventListener("click", resetSettings);
   $("resetParamsTextBtn").addEventListener("click", resetParamsTextOverride);
   $("selectAllBtn").addEventListener("click", selectAllPhotos);
@@ -2169,9 +2178,16 @@ async function exportAlbum(kind) {
       selection,
       outputDir: picked.folder,
     });
+    state.currentExportJobId = started.jobId || "";
+    state.exportCanceling = false;
+    setExportCancelVisible(!!state.currentExportJobId);
     await pollExportJob(started.jobId, kind);
   } catch (error) {
     showError(error);
+  } finally {
+    state.currentExportJobId = "";
+    state.exportCanceling = false;
+    setExportCancelVisible(false);
   }
 }
 
@@ -2190,10 +2206,34 @@ async function pollExportJob(jobId, kind) {
       showExportCompleteDialog(kind, result);
       return;
     }
+    if (job.status === "canceled") {
+      setIdle("status.exportCanceled");
+      return;
+    }
     if (job.status === "error") {
       throw new Error(job.error || t("error.exportFailed"));
     }
   }
+}
+
+async function cancelExport() {
+  if (!state.currentExportJobId || state.exportCanceling) {
+    return;
+  }
+  state.exportCanceling = true;
+  $("cancelExportBtn").disabled = true;
+  setBusy("progress.cancelingExport", null);
+  try {
+    await api("/api/export/cancel", { jobId: state.currentExportJobId });
+  } catch (error) {
+    showError(error);
+  }
+}
+
+function setExportCancelVisible(visible) {
+  const button = $("cancelExportBtn");
+  button.hidden = !visible;
+  button.disabled = !visible || state.exportCanceling;
 }
 
 function localizeJobMessage(message) {
@@ -2202,6 +2242,8 @@ function localizeJobMessage(message) {
     "准备导出": "progress.prepareExport",
     "导出完成": "progress.exportComplete",
     "导出失败": "progress.exportFailed",
+    "导出已取消": "status.exportCanceled",
+    "正在取消": "progress.cancelingExport",
     "写入 PPTX": "progress.writingPptx",
   };
   if (exact[text]) {

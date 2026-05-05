@@ -729,6 +729,10 @@ body.busy .busyOverlay {
   font-weight: 650;
 }
 
+.cancelExportBtn {
+  margin-top: 4px;
+}
+
 .shutterLoader {
   width: 66px;
   height: 66px;

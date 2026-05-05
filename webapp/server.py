@@ -97,6 +97,10 @@ class Photo:
     exif: dict[str, str]
 
 
+class ExportCancelled(RuntimeError):
+    pass
+
+
 DEFAULT_SETTINGS = {
     "slideWidth": 1920,
     "slideHeight": 1080,
@@ -1904,6 +1908,7 @@ def start_export_job(payload: dict[str, Any]) -> dict[str, Any]:
             "message": "准备导出",
             "result": None,
             "error": None,
+            "cancelRequested": False,
             "created": time.time(),
         }
 
@@ -1923,7 +1928,10 @@ def run_export_job(job_id: str, kind: str, payload: dict[str, Any]) -> None:
             result = export_images_with_progress(photos, output_dir, settings, job_id)
         else:
             result = export_pptx_with_progress(album, photos, output_dir, settings, job_id)
+        ensure_export_not_cancelled(job_id)
         update_export_job(job_id, status="done", progress=1, message="导出完成", result=result)
+    except ExportCancelled:
+        update_export_job(job_id, status="canceled", message="导出已取消", error=None)
     except Exception as exc:
         update_export_job(job_id, status="error", message="导出失败", error=str(exc))
 
@@ -1964,6 +1972,7 @@ def export_pptx_with_progress(
             progress_total=len(photos),
             temp_dir=Path(temp_root),
         )
+        ensure_export_not_cancelled(job_id)
         update_export_job(job_id, done=len(photos), total=total, progress=len(photos) / total, message="写入 PPTX")
         write_pptx(output_file, rendered_images, int(deck_settings["slideWidth"]), int(deck_settings["slideHeight"]))
     update_export_job(job_id, done=total, total=total, progress=1, message="写入 PPTX")
@@ -1992,6 +2001,7 @@ def export_photo_images_parallel(
             progress=0,
             message=f"{message_prefix} 0/{display_total}",
         )
+    ensure_export_not_cancelled(job_id)
 
     ordered: list[str | None] = [None] * len(photos)
     completed = 0
@@ -2001,6 +2011,9 @@ def export_photo_images_parallel(
             for index, (photo, target) in enumerate(zip(photos, targets))
         }
         for future in as_completed(future_map):
+            if export_cancel_requested(job_id):
+                cancel_pending_futures(future_map)
+                raise ExportCancelled()
             index = future_map[future]
             ordered[index] = future.result()
             completed += 1
@@ -2012,6 +2025,7 @@ def export_photo_images_parallel(
                     progress=completed / total_units,
                     message=f"{message_prefix} {completed}/{display_total}",
                 )
+            ensure_export_not_cancelled(job_id)
 
     return [path for path in ordered if path is not None]
 
@@ -2038,6 +2052,7 @@ def render_pptx_images_parallel(
             progress=0,
             message=f"{message_prefix} 0/{display_total}",
         )
+    ensure_export_not_cancelled(job_id)
 
     ordered: list[dict[str, Any] | None] = [None] * len(photos)
     completed = 0
@@ -2056,6 +2071,9 @@ def render_pptx_images_parallel(
                 for index, photo in enumerate(photos)
             }
         for future in as_completed(future_map):
+            if export_cancel_requested(job_id):
+                cancel_pending_futures(future_map)
+                raise ExportCancelled()
             index = future_map[future]
             ordered[index] = future.result()
             completed += 1
@@ -2067,8 +2085,14 @@ def render_pptx_images_parallel(
                     progress=completed / total_units,
                     message=f"{message_prefix} {completed}/{display_total}",
                 )
+            ensure_export_not_cancelled(job_id)
 
     return [item for item in ordered if item is not None]
+
+
+def cancel_pending_futures(future_map: dict[Any, int]) -> None:
+    for future in future_map:
+        future.cancel()
 
 
 def render_and_save_export_photo(photo: dict[str, Any], target: Path, settings: dict[str, Any]) -> str:
@@ -2238,6 +2262,30 @@ def update_export_job(job_id: str, **updates: Any) -> None:
         if not job:
             return
         job.update(updates)
+
+
+def request_export_cancel(job_id: str) -> dict[str, Any]:
+    with EXPORT_LOCK:
+        job = EXPORT_JOBS.get(job_id)
+        if not job:
+            raise ValueError("Export job not found.")
+        if job.get("status") == "running":
+            job["cancelRequested"] = True
+            job["message"] = "正在取消"
+        return dict(job)
+
+
+def export_cancel_requested(job_id: str | None) -> bool:
+    if not job_id:
+        return False
+    with EXPORT_LOCK:
+        job = EXPORT_JOBS.get(job_id)
+        return bool(job and job.get("cancelRequested"))
+
+
+def ensure_export_not_cancelled(job_id: str | None) -> None:
+    if export_cancel_requested(job_id):
+        raise ExportCancelled()
 
 
 def get_export_job(job_id: str) -> dict[str, Any]:
@@ -2522,6 +2570,8 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.send_json(start_export_job(payload))
             if parsed.path == "/api/export/status":
                 return self.send_json(get_export_job(clean_text(payload.get("jobId"))))
+            if parsed.path == "/api/export/cancel":
+                return self.send_json(request_export_cancel(clean_text(payload.get("jobId"))))
             if parsed.path == "/api/banner-layout":
                 return self.send_json(self.banner_layout(payload))
             if parsed.path == "/api/preview":
