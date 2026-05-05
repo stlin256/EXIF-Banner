@@ -1662,6 +1662,7 @@ function scheduleServerPreview() {
   const serial = ++state.previewSerial;
   const index = state.current;
   const cached = getCachedPreview(index);
+  abortStalePreviewRequests(new Set([previewCacheKey(index)]));
   if (cached) {
     setPreviewImage(cached);
     schedulePreviewWarmup(index);
@@ -1678,6 +1679,7 @@ function markPreviewSettingsChanged() {
   state.previewWarmQueued.clear();
   window.clearTimeout(state.preloadTimer);
   window.clearTimeout(state.warmIdleTimer);
+  abortStalePreviewRequests();
 }
 
 async function renderServerPreview(index = state.current, serial = ++state.previewSerial) {
@@ -1700,7 +1702,9 @@ async function renderServerPreview(index = state.current, serial = ++state.previ
     setPreviewImage(url);
     schedulePreviewWarmup(index);
   } catch (error) {
-    console.error(error);
+    if (!isAbortError(error)) {
+      console.error(error);
+    }
   }
 }
 
@@ -1735,12 +1739,14 @@ async function fetchPreviewUrl(index) {
   }
   const existing = state.previewRequests.get(key);
   if (existing) {
-    return existing;
+    return existing.promise;
   }
+  const controller = new AbortController();
   const request = fetch("/api/preview", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     cache: "no-store",
+    signal: controller.signal,
     body: JSON.stringify({
       albumId: state.albumId,
       index,
@@ -1758,10 +1764,26 @@ async function fetchPreviewUrl(index) {
       return url;
     })
     .finally(() => {
-      state.previewRequests.delete(key);
+      const current = state.previewRequests.get(key);
+      if (current?.promise === request) {
+        state.previewRequests.delete(key);
+      }
     });
-  state.previewRequests.set(key, request);
+  state.previewRequests.set(key, { promise: request, controller, index });
   return request;
+}
+
+function abortStalePreviewRequests(keepKeys = new Set()) {
+  for (const [key, request] of state.previewRequests) {
+    if (!keepKeys.has(key)) {
+      request.controller?.abort();
+      state.previewRequests.delete(key);
+    }
+  }
+}
+
+function isAbortError(error) {
+  return error?.name === "AbortError";
 }
 
 function rememberPreview(key, url, bytes = 0) {
@@ -1891,7 +1913,11 @@ function pumpPreviewWarmQueue() {
     const token = `${item.generation}:${item.index}:${performance.now()}`;
     state.previewWarmActive.add(token);
     fetchPreviewUrl(item.index)
-      .catch(() => {})
+      .catch((error) => {
+        if (!isAbortError(error)) {
+          console.error(error);
+        }
+      })
       .finally(() => {
         state.previewWarmActive.delete(token);
         if (item.generation === state.previewWarmGeneration) {
@@ -1915,6 +1941,7 @@ function clearPreviewImages() {
   }
   state.previewCache.clear();
   state.previewCacheBytes = 0;
+  abortStalePreviewRequests();
   state.previewRequests.clear();
 }
 
