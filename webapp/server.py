@@ -2699,6 +2699,39 @@ def write_pptx(output_file: Path, rendered_images: list[dict[str, Any]], width_p
 
     output_file.parent.mkdir(parents=True, exist_ok=True)
     presentation.save(output_file)
+    validate_pptx_package(output_file, len(rendered_images))
+
+
+def validate_pptx_package(output_file: Path, expected_slide_count: int) -> None:
+    if not output_file.exists() or output_file.stat().st_size <= 0:
+        raise RuntimeError(f"PPTX export failed: output file was not created: {output_file}")
+    try:
+        with zipfile.ZipFile(output_file) as package:
+            bad_member = package.testzip()
+            if bad_member:
+                raise RuntimeError(f"PPTX export failed: corrupt package member: {bad_member}")
+            names = set(package.namelist())
+            required = {
+                "[Content_Types].xml",
+                "_rels/.rels",
+                "ppt/presentation.xml",
+                "ppt/_rels/presentation.xml.rels",
+            }
+            missing = sorted(required - names)
+            if missing:
+                raise RuntimeError(f"PPTX export failed: missing package parts: {', '.join(missing)}")
+            slide_count = sum(1 for name in names if re.fullmatch(r"ppt/slides/slide\d+\.xml", name))
+            if slide_count != expected_slide_count:
+                raise RuntimeError(
+                    f"PPTX export failed: expected {expected_slide_count} slides, found {slide_count}."
+                )
+            media_count = sum(1 for name in names if name.startswith("ppt/media/"))
+            if expected_slide_count and media_count < expected_slide_count:
+                raise RuntimeError(
+                    f"PPTX export failed: expected at least {expected_slide_count} media files, found {media_count}."
+                )
+    except zipfile.BadZipFile as exc:
+        raise RuntimeError(f"PPTX export failed: invalid PPTX package: {output_file}") from exc
 
 
 def content_types(slide_count: int, image_ext: str, image_mime: str) -> str:
