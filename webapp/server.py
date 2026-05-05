@@ -49,6 +49,9 @@ LOGO_CACHE: dict[str, tuple[tuple[int, int], Image.Image]] = {}
 LOGO_CACHE_LOCK = Lock()
 LOGO_RULES_CACHE: tuple[int, list[dict[str, Any]]] | None = None
 LOGO_RULES_LOCK = Lock()
+EXIF_CACHE_LOCK = Lock()
+EXIF_CACHE_SCHEMA = 1
+EXIF_CACHE_MAX_ENTRIES = 50000
 PREVIEW_CACHE: OrderedDict[str, bytes] = OrderedDict()
 PREVIEW_CACHE_LOCK = Lock()
 PREVIEW_CACHE_BYTES = 0
@@ -156,12 +159,18 @@ def find_exiftool(root: Path) -> str | None:
 def read_exif_batch(paths: list[Path], root: Path, recursive: bool) -> tuple[dict[str, dict[str, str]], str]:
     native_results: dict[str, dict[str, str]] = {}
     native_failures = 0
-    for path, metadata, failed in read_native_exif_parallel(paths):
+    cached_results, uncached_paths, exif_cache = cached_exif_results(paths)
+    native_results.update(cached_results)
+    for path, metadata, failed in read_native_exif_parallel(uncached_paths):
         native_results[str(path.resolve())] = metadata
         if failed:
             native_failures += 1
+    if uncached_paths:
+        remember_exif_results(exif_cache, native_results, uncached_paths)
     if any(has_useful_exif(metadata) for metadata in native_results.values()):
         source = "Native Python"
+        if cached_results:
+            source += " cache"
         if native_failures:
             source += f" ({native_failures} failed)"
         return native_results, source
@@ -169,10 +178,121 @@ def read_exif_batch(paths: list[Path], root: Path, recursive: bool) -> tuple[dic
     exiftool = find_exiftool(root)
     if exiftool:
         try:
-            return read_with_exiftool(paths, exiftool, root, recursive), f"ExifTool ({exiftool})"
+            exiftool_results = read_with_exiftool(paths, exiftool, root, recursive)
+            remember_exif_results(exif_cache, exiftool_results, paths)
+            return exiftool_results, f"ExifTool ({exiftool})"
         except Exception:
             pass
     return native_results, "Native Python"
+
+
+def cached_exif_results(paths: list[Path]) -> tuple[dict[str, dict[str, str]], list[Path], dict[str, Any]]:
+    exif_cache = load_exif_cache()
+    entries = exif_cache.setdefault("entries", {})
+    cached: dict[str, dict[str, str]] = {}
+    missing: list[Path] = []
+    for path in paths:
+        key, signature = exif_cache_key_and_signature(path)
+        entry = entries.get(key)
+        if isinstance(entry, dict) and entry.get("signature") == signature and isinstance(entry.get("exif"), dict):
+            cached[str(path.resolve())] = {str(k): clean_text(v) for k, v in entry["exif"].items()}
+        else:
+            missing.append(path)
+    return cached, missing, exif_cache
+
+
+def remember_exif_results(exif_cache: dict[str, Any], results: dict[str, dict[str, str]], paths: list[Path]) -> None:
+    entries = exif_cache.setdefault("entries", {})
+    now = time.time()
+    changed = False
+    for path in paths:
+        key, signature = exif_cache_key_and_signature(path)
+        metadata = results.get(str(path.resolve()), results.get(str(path), {}))
+        entries[key] = {
+            "signature": signature,
+            "exif": metadata,
+            "used": now,
+        }
+        changed = True
+    if changed:
+        save_exif_cache(exif_cache)
+
+
+def exif_cache_key_and_signature(path: Path) -> tuple[str, dict[str, Any]]:
+    try:
+        resolved = str(path.resolve())
+    except OSError:
+        resolved = str(path)
+    if os.name == "nt":
+        resolved = resolved.casefold()
+    try:
+        stat = path.stat()
+        signature = {"mtime": stat.st_mtime_ns, "size": stat.st_size}
+    except OSError:
+        signature = {"mtime": 0, "size": 0}
+    key = hashlib.sha256(resolved.encode("utf-8", errors="surrogatepass")).hexdigest()
+    return key, signature
+
+
+def load_exif_cache() -> dict[str, Any]:
+    path = exif_cache_path()
+    if path is None:
+        return {"schema": EXIF_CACHE_SCHEMA, "entries": {}}
+    with EXIF_CACHE_LOCK:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if data.get("schema") == EXIF_CACHE_SCHEMA and isinstance(data.get("entries"), dict):
+                return data
+        except Exception:
+            pass
+    return {"schema": EXIF_CACHE_SCHEMA, "entries": {}}
+
+
+def save_exif_cache(exif_cache: dict[str, Any]) -> None:
+    path = exif_cache_path()
+    if path is None:
+        return
+    with EXIF_CACHE_LOCK:
+        entries = exif_cache.get("entries")
+        if not isinstance(entries, dict):
+            return
+        if len(entries) > EXIF_CACHE_MAX_ENTRIES:
+            ordered = sorted(
+                entries.items(),
+                key=lambda item: float(item[1].get("used", 0)) if isinstance(item[1], dict) else 0,
+                reverse=True,
+            )
+            exif_cache["entries"] = dict(ordered[:EXIF_CACHE_MAX_ENTRIES])
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(exif_cache, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+        tmp.replace(path)
+
+
+def exif_cache_path() -> Path | None:
+    directory = app_cache_dir()
+    return directory / "exif-cache.json" if directory else None
+
+
+def app_cache_dir() -> Path | None:
+    candidates: list[Path] = []
+    override = os.environ.get("EXIF_BANNER_CACHE_DIR")
+    if override:
+        candidates.append(Path(override))
+    if os.name == "nt":
+        for value in (os.environ.get("LOCALAPPDATA"), os.environ.get("APPDATA")):
+            if value:
+                candidates.append(Path(value) / "EXIF-Banner")
+    else:
+        candidates.append(Path(os.environ.get("XDG_CACHE_HOME", Path.home() / ".cache")) / "EXIF-Banner")
+    candidates.append(Path.home() / ".exif-banner")
+    for path in candidates:
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+            return path
+        except OSError:
+            continue
+    return None
 
 
 def read_native_exif_parallel(paths: list[Path]) -> list[tuple[Path, dict[str, str], bool]]:
