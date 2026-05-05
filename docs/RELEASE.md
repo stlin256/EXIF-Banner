@@ -108,6 +108,20 @@ $env:TMP = $env:TEMP
 
 ## 编译 EXE
 
+推荐直接使用发布脚本，它会执行发布前验证、PyInstaller 构建、复制单文件 exe 到 `release/vX.Y.Z/`，并生成本地 `GITHUB_RELEASE.md` 模板：
+
+```powershell
+.\tools\build_release.ps1 -Version v0.1.0
+```
+
+如需只验证打包命令本身，可以跳过发布前验证：
+
+```powershell
+.\tools\build_release.ps1 -Version v0.1.0 -SkipPreflight
+```
+
+也可以手动执行下面的 PyInstaller 命令。
+
 在仓库根目录执行：
 
 ```powershell
